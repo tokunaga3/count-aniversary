@@ -1,4 +1,3 @@
-// filepath: /Users/mutskitokunaga/workspace/study/count-aniversary/src/app/api/auth/[...nextauth]/route.ts
 import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import type { NextAuthOptions } from "next-auth";

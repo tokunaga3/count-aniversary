@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../auth/[...nextauth]/route";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -11,13 +11,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { startDate, intervalType, count, comment } = await req.json();
+    const { intervalType, count, comment } = await req.json();
     const auth = new google.auth.OAuth2();
     auth.setCredentials({ access_token: session.accessToken });
 
     const calendar = google.calendar({ version: "v3", auth });
 
-    let currentDate = new Date(startDate);
+    const currentDate = new Date();
     for (let i = 1; i <= count; i++) {
       const event = {
         summary: `🎉 ${i}回目の記念日 🎉`,
@@ -28,8 +28,8 @@ export async function POST(req: NextRequest) {
           timeZone: "Asia/Tokyo",
         },
       };
-
-      await calendar.events.insert({
+      
+      calendar.events.insert({
         calendarId: "primary",
         resource: event,
       });
