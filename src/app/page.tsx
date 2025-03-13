@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 
 export default async function Home() {
   const session = await getServerSession(authOptions);
+  console.log(process.env);
 
   return (
     <main style={{ padding: "20px", maxWidth: "600px", margin: "0 auto" }}>
