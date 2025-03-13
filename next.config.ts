@@ -1,13 +1,15 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  /* config options here */
+
+
+
+const config = {
+  serverExternalPackages: ["googleapis"],
 };
 
-module.exports = {
-  experimental: {
-    serverComponentsExternalPackages: ["googleapis"],
-  },
+const nextConfig: NextConfig = {
+  ...config,
+  /* config options here */
 };
 
 export default nextConfig;
