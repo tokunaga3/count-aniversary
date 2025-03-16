@@ -9,13 +9,16 @@ export default function AnniversaryForm() {
   );
   const [count, setCount] = useState<number>(10);
   const [comment, setComment] = useState<string>("");
-
+  const [calenderId, setCalenderId] = useState<string>("");
+  const [title, setTitle] = useState<string>("");
+  
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     const response = await fetch("/api/anniversary", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ startDate, intervalType, count, comment }),
+      body: JSON.stringify({ startDate, intervalType, count, comment, calenderId, title }),
     });
 
     if (response.ok) {
@@ -24,10 +27,22 @@ export default function AnniversaryForm() {
       alert("エラーが発生しました");
     }
   };
-
   return (
-    <form onSubmit={handleSubmit}>
-      <label>記念日開始日:</label>
+    <form onSubmit={handleSubmit} style={{ display: "grid", gap: "10px" }} className="text-black">
+      <label className="text-white">カレンダーID:</label>
+      <input
+        type="text"
+        value={calenderId}
+        onChange={(e) => setCalenderId(e.target.value)}
+        required
+      />
+      <label className="text-white">title</label>
+      <input
+        type="text"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <label className="text-white">記念日開始日:</label>
       <input
         type="date"
         value={startDate}
@@ -35,7 +50,7 @@ export default function AnniversaryForm() {
         required
       />
 
-      <label>間隔:</label>
+      <label className="text-white">間隔:</label>
       <select
         value={intervalType}
         onChange={(e) =>
@@ -46,7 +61,7 @@ export default function AnniversaryForm() {
         <option value="monthly">月ごと</option>
       </select>
 
-      <label>何回目まで記録するか:</label>
+      <label className="text-white">何回目まで記録するか:</label>
       <input
         type="number"
         value={count}
@@ -55,14 +70,14 @@ export default function AnniversaryForm() {
         required
       />
 
-      <label>コメント:</label>
+      <label className="text-white">コメント:</label>
       <input
         type="text"
         value={comment}
         onChange={(e) => setComment(e.target.value)}
         required
       />
-      <button type="submit">Googleカレンダーに追加</button>
+      <button className="text-white" type="submit">Googleカレンダーに追加</button>
     </form>
   );
 }

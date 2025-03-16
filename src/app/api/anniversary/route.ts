@@ -11,16 +11,18 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { intervalType, count, comment } = await req.json();
+    const { intervalType, count, comment, calenderId, startDate, title} = await req.json();
     const auth = new google.auth.OAuth2();
     auth.setCredentials({ access_token: session.accessToken });
 
+    console.log(startDate);
+    const start = startDate + 'T00:00:00.285Z'
     const calendar = google.calendar({ version: "v3", auth });
-
-    const currentDate = new Date();
+    const currentDate = new Date(new Date(start).getTime() - 9 * 60 * 60 * 1000);
     for (let i = 1; i <= count; i++) {
+      const eventTitle = title ? title.replace("#", i.toString()) : `🎉 ${i}回目の記念日 🎉`;
       const event = {
-        summary: `🎉 ${i}回目の記念日 🎉`,
+        summary: eventTitle,
         description: comment,
         start: { dateTime: currentDate.toISOString(), timeZone: "Asia/Tokyo" },
         end: {
@@ -28,9 +30,9 @@ export async function POST(req: NextRequest) {
           timeZone: "Asia/Tokyo",
         },
       };
-      
+
       calendar.events.insert({
-        calendarId: "primary",
+        calendarId: calenderId || "primary",
         requestBody: event,
       });
 
