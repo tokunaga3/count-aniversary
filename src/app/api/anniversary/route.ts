@@ -11,13 +11,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { intervalType, count, comment, calenderId, startDate, title} = await req.json();
+    const { intervalType, count, comment, calenderId: calendarId, startDate, title} = await req.json();
     const auth = new google.auth.OAuth2();
     auth.setCredentials({ access_token: session.accessToken });
 
-    console.log(startDate);
     const start = startDate + 'T00:00:00.285Z'
     const calendar = google.calendar({ version: "v3", auth });
+    
     const currentDate = new Date(new Date(start).getTime() - 9 * 60 * 60 * 1000);
     for (let i = 1; i <= count; i++) {
       const eventTitle = title ? title.replace("#", i.toString()) : `🎉 ${i}回目の記念日 🎉`;
@@ -31,15 +31,14 @@ export async function POST(req: NextRequest) {
         },
       };
 
-      calendar.events.insert({
-        calendarId: calenderId || "primary",
+      await calendar.events.insert({
+        calendarId: calendarId || "primary",
         requestBody: event,
       });
-
       if (intervalType === "yearly") {
-        currentDate.setFullYear(currentDate.getFullYear() + 1);
+        await currentDate.setFullYear(currentDate.getFullYear() + 1);
       } else {
-        currentDate.setMonth(currentDate.getMonth() + 1);
+        await currentDate.setMonth(currentDate.getMonth() + 1);
       }
     }
 
