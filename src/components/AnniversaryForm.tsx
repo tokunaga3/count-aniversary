@@ -27,40 +27,33 @@ export default function AnniversaryForm() {
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState<boolean>(false);
   const [isDeleteMode, setIsDeleteMode] = useState<boolean>(false);
 
-  const generateTitle = (count: number, type: 'years' | 'months' | 'yearsAndMonths') => {
-    if (title.includes('#')) {
-      if (type === 'years') {
-        return title.replace('#', `${count}`);
-      } else if (type === 'months') {
-        return title.replace('##', `${count}`);
-      } else if (type === 'yearsAndMonths') {
-        const years = Math.floor(count / 12);
-        const months = count % 12;
-        if (years === 0) {
-          return title.replace('#年##ヶ月', `${months}ヶ月`);
-        }
-        return title.replace('#', `${years}`).replace('##', `${months}`);
-      }
-    }
-    return title || `🎉 ${count}回目の記念日 🎉`;
-  };
 
   const addSpecialDate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!date || !calendarId) return;
     setIsLoading(true);
-    const generatedTitle = generateTitle(repeatCount, countType);
     try {
+      const intervalType = countType === 'years' ? 'yearly' : 'monthly';
+      const titleToSend = title.trim() === '' ? '🎉 #回目の記念日 🎉' : title;
+      console.log('Sending data to API:', {
+        startDate: date,
+        intervalType,
+        count: repeatCount,
+        comment: description,
+        calenderId: calendarId,
+        title: titleToSend
+      });
+      
       const response = await fetch("/api/anniversary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           startDate: date,
-          intervalType: 'monthly',
+          intervalType,
           count: repeatCount,
           comment: description,
           calenderId: calendarId,
-          title: generatedTitle || undefined
+          title: titleToSend
         }),
       });
 
@@ -68,7 +61,7 @@ export default function AnniversaryForm() {
         const newDate: SpecialDate = {
           id: crypto.randomUUID(),
           calendarId,
-          title: generatedTitle,
+          title: titleToSend || '🎉 #回目の記念日 🎉',
           date,
           description,
           countType,
@@ -237,7 +230,6 @@ export default function AnniversaryForm() {
                   >
                     <option value="years">年単位</option>
                     <option value="months">月単位</option>
-                    <option value="yearsAndMonths">年と月</option>
                   </select>
                 </div>
 

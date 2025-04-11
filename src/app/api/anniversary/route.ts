@@ -12,6 +12,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const { intervalType, count, comment, calenderId: calendarId, startDate, title} = await req.json();
+    console.log('Received data:', { intervalType, count, comment, calendarId, startDate, title });
+    
     const auth = new google.auth.OAuth2();
     auth.setCredentials({ access_token: session.accessToken });
 
@@ -20,18 +22,24 @@ export async function POST(req: NextRequest) {
     
     const currentDate = new Date(new Date(start).getTime() - 9 * 60 * 60 * 1000);
     let eventTitle;
-
     for (let i = 1; i <= count; i++) {
-      if (!title) {
+      console.log('Generating title for iteration:', i);
+      console.log('Current title template:', title);
+      
+      if (title === null || title === undefined) {
+        // タイトルが指定されていない場合のデフォルト
         if (intervalType === "yearly") {
-          eventTitle = `🎉 ${count}回目の記念日 🎉`;
-        } else {
+          eventTitle = `🎉 ${i}回目の記念日 🎉`;
+        } else if (intervalType === "monthly") {
           const years = Math.floor((i - 1) / 12);
           const months = ((i - 1) % 12) + 1;
-          eventTitle = `🎉 ${years}年${months}ヶ月の記念日 🎉`;
+          eventTitle = years === 0 
+            ? `🎉 ${months}ヶ月目の記念日 🎉`
+            : `🎉 ${years}年${months}ヶ月目の記念日 🎉`;
         }
-      } else if (title) {
+      } else {
         if (intervalType === "yearly") {
+          // 年単位の場合は単純に#を回数に置換
           eventTitle = title.replace("#", i.toString());
         } else {
           // 月数から年と月を計算
@@ -45,6 +53,9 @@ export async function POST(req: NextRequest) {
             } else {
               eventTitle = title.replace("#年##ヶ月", `${years}年${months}ヶ月`);
             }
+          } else if (title.includes("#回目")) {
+            // "🎉 #回目の記念日 🎉" のようなフォーマットの場合
+            eventTitle = title.replace("#", i.toString());
           } else {
             // 通常の#置換の場合
             if (years === 0) {
@@ -54,13 +65,9 @@ export async function POST(req: NextRequest) {
             }
           }
         }
-      } else if (intervalType === "monthly") {
-        const years = Math.floor((i - 1) / 12);
-        const months = ((i - 1) % 12) + 1;
-        eventTitle = years === 0 
-          ? `🎉 ${months}ヶ月目の記念日 🎉`
-          : `🎉 ${years}年${months}ヶ月目の記念日 🎉`;
       }
+      
+      console.log('Generated title:', eventTitle);
 
       const event = {
         summary: eventTitle,
@@ -71,7 +78,7 @@ export async function POST(req: NextRequest) {
           timeZone: "Asia/Tokyo",
         },
       };
-
+      console.log(event)
       await calendar.events.insert({
         calendarId: calendarId || "primary",
         requestBody: event,
@@ -139,6 +146,7 @@ export async function DELETE(req: NextRequest) {
           eventId: event.id,
         });
       }
+      console.log(`deleted: ${event.summary}`)
     }
     
     return NextResponse.json({
