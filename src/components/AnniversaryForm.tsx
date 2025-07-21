@@ -134,24 +134,142 @@ export default function AnniversaryForm() {
   const handleDeleteByCalendarId = async () => {
     if (!deleteCalendarId) return;
     setIsLoading(true);
+    setProgress(0);
+    setProgressMessage('削除処理を開始しています...');
+    
+    // 開発環境用にSSEを試行し、即座にフォールバックするオプション
+    const useSSE = process.env.NODE_ENV === 'production'; // 本番環境でのみSSEを使用
+    
+    if (useSSE) {
+      console.log('Attempting SSE connection for delete...');
+      trySSEDelete();
+    } else {
+      console.log('Using fallback delete approach for development...');
+      performFallbackDelete();
+    }
+  };
+
+  // SSE削除を試行する関数
+  const trySSEDelete = async () => {
     try {
-      const response = await fetch(`/api/anniversary?calendarId=${deleteCalendarId}`, {
+      const eventSource = new EventSource(`/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}&streaming=true`);
+      
+      // 短いタイムアウト（5秒）で早めにフォールバック
+      const timeout = setTimeout(() => {
+        console.log('SSE connection timeout - switching to fallback');
+        eventSource.close();
+        performFallbackDelete();
+      }, 5000);
+      
+      eventSource.onopen = () => {
+        console.log('SSE connection opened successfully');
+        setProgressMessage('リアルタイム削除処理に接続中...');
+      };
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'progress') {
+            setProgress(data.progress);
+            setProgressMessage(data.message);
+          } else if (data.type === 'complete') {
+            clearTimeout(timeout);
+            setProgress(100);
+            setProgressMessage('🗑️ 削除完了！');
+            
+            setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
+            setDeleteCalendarId('');
+            setShowDeleteConfirmation(false);
+            eventSource.close();
+            
+            setTimeout(() => {
+              setProgress(0);
+              setProgressMessage('');
+              setIsLoading(false);
+              alert(`${data.deletedCount || 0}件の予定を削除しました！`);
+            }, 2000);
+          } else if (data.type === 'error') {
+            clearTimeout(timeout);
+            eventSource.close();
+            console.error('SSE reported error, switching to fallback');
+            performFallbackDelete();
+          }
+        } catch (parseError) {
+          console.error('SSE parse error, switching to fallback:', parseError);
+          clearTimeout(timeout);
+          eventSource.close();
+          performFallbackDelete();
+        }
+      };
+      
+      eventSource.onerror = () => {
+        console.log('SSE connection error, switching to fallback immediately');
+        clearTimeout(timeout);
+        eventSource.close();
+        performFallbackDelete();
+      };
+      
+    } catch (initError) {
+      console.error('Failed to initialize SSE, using fallback:', initError);
+      performFallbackDelete();
+    }
+  };
+
+  // フォールバック用の通常削除処理（進捗バー付き）
+  const performFallbackDelete = async () => {
+    try {
+      setIsLoading(true);
+      setProgress(10);
+      setProgressMessage('削除対象の予定を検索中...');
+      
+      // 段階的な進捗シミュレーション
+      const deleteSteps = [
+        { delay: 200, progress: 20, message: 'カレンダーに接続中...' },
+        { delay: 500, progress: 40, message: '削除対象を特定中...' },
+        { delay: 800, progress: 60, message: '予定を削除中...' },
+        { delay: 1200, progress: 80, message: '削除処理を完了中...' }
+      ];
+
+      deleteSteps.forEach(step => {
+        setTimeout(() => {
+          setProgress(step.progress);
+          setProgressMessage(step.message);
+        }, step.delay);
+      });
+      
+      const response = await fetch(`/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}`, {
         method: "DELETE",
       });
 
       if (response.ok) {
+        const result = await response.json();
+        setProgress(100);
+        setProgressMessage('🗑️ 削除完了！');
+        
         setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
         setDeleteCalendarId('');
         setShowDeleteConfirmation(false);
-        alert("予定を削除しました！");
+        
+        setTimeout(() => {
+          setProgress(0);
+          setProgressMessage('');
+          setIsLoading(false);
+          alert(`${result.deletedCount || 0}件の予定を削除しました！`);
+        }, 2000);
       } else {
         const errorData = await response.json();
-        alert(errorData.error || "エラーが発生しました");
+        setProgress(0);
+        setProgressMessage('');
+        setIsLoading(false);
+        alert(errorData.error || "削除処理でエラーが発生しました");
       }
-    } catch {
-      alert("エラーが発生しました");
-    } finally {
+    } catch (fallbackError) {
+      console.error('Fallback delete failed:', fallbackError);
+      setProgress(0);
+      setProgressMessage('');
       setIsLoading(false);
+      alert("削除処理でエラーが発生しました");
     }
   };
 
@@ -165,8 +283,17 @@ export default function AnniversaryForm() {
               {/* アニメーション付きローダー */}
               <div className="flex justify-center mb-4">
                 <div className="relative">
-                  <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
-                  <div className="absolute inset-0 w-12 h-12 border-2 border-blue-200 rounded-full animate-pulse"></div>
+                  {progressMessage.includes('削除') ? (
+                    <>
+                      <Loader2 className="w-12 h-12 text-red-500 animate-spin" />
+                      <div className="absolute inset-0 w-12 h-12 border-2 border-red-200 rounded-full animate-pulse"></div>
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+                      <div className="absolute inset-0 w-12 h-12 border-2 border-blue-200 rounded-full animate-pulse"></div>
+                    </>
+                  )}
                 </div>
               </div>
               
@@ -174,7 +301,7 @@ export default function AnniversaryForm() {
               <h3 className="text-xl font-bold text-gray-800">{progressMessage}</h3>
               
               {/* 進捗パーセンテージ */}
-              <div className="text-lg font-semibold text-blue-600">
+              <div className={`text-lg font-semibold ${progressMessage.includes('削除') ? 'text-red-600' : 'text-blue-600'}`}>
                 {progress}%完了
               </div>
               
@@ -182,7 +309,11 @@ export default function AnniversaryForm() {
               <div className="space-y-2">
                 <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
                   <div 
-                    className="bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-600 h-4 rounded-full transition-all duration-700 ease-out relative overflow-hidden"
+                    className={`h-4 rounded-full transition-all duration-700 ease-out relative overflow-hidden ${
+                      progressMessage.includes('削除') 
+                        ? 'bg-gradient-to-r from-red-500 via-red-600 to-red-700' 
+                        : 'bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-600'
+                    }`}
                     style={{ width: `${progress}%` }}
                   >
                     {/* 進捗バーのアニメーション効果 */}
@@ -192,19 +323,35 @@ export default function AnniversaryForm() {
                 
                 {/* 進捗ステップ表示 */}
                 <div className="flex justify-between text-xs text-gray-500 mt-2">
-                  <span className={progress >= 10 ? "text-blue-600 font-semibold" : ""}>開始</span>
-                  <span className={progress >= 30 ? "text-blue-600 font-semibold" : ""}>処理中</span>
-                  <span className={progress >= 60 ? "text-blue-600 font-semibold" : ""}>登録中</span>
-                  <span className={progress >= 90 ? "text-blue-600 font-semibold" : ""}>最終処理</span>
-                  <span className={progress >= 100 ? "text-green-600 font-semibold" : ""}>完了</span>
+                  {progressMessage.includes('削除') ? (
+                    <>
+                      <span className={progress >= 10 ? "text-red-600 font-semibold" : ""}>検索</span>
+                      <span className={progress >= 20 ? "text-red-600 font-semibold" : ""}>開始</span>
+                      <span className={progress >= 50 ? "text-red-600 font-semibold" : ""}>削除中</span>
+                      <span className={progress >= 90 ? "text-red-600 font-semibold" : ""}>完了処理</span>
+                      <span className={progress >= 100 ? "text-green-600 font-semibold" : ""}>完了</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className={progress >= 10 ? "text-blue-600 font-semibold" : ""}>開始</span>
+                      <span className={progress >= 30 ? "text-blue-600 font-semibold" : ""}>処理中</span>
+                      <span className={progress >= 60 ? "text-blue-600 font-semibold" : ""}>登録中</span>
+                      <span className={progress >= 90 ? "text-blue-600 font-semibold" : ""}>最終処理</span>
+                      <span className={progress >= 100 ? "text-green-600 font-semibold" : ""}>完了</span>
+                    </>
+                  )}
                 </div>
               </div>
               
               {/* 完了時のアニメーション */}
               {progress === 100 && (
-                <div className="text-green-600 animate-bounce">
-                  <div className="text-2xl">✅</div>
-                  <div className="text-sm font-medium">登録完了！</div>
+                <div className={`animate-bounce ${progressMessage.includes('削除') ? 'text-red-600' : 'text-green-600'}`}>
+                  <div className="text-2xl">
+                    {progressMessage.includes('削除') ? '🗑️' : '✅'}
+                  </div>
+                  <div className="text-sm font-medium">
+                    {progressMessage.includes('削除') ? '削除完了！' : '登録完了！'}
+                  </div>
                 </div>
               )}
             </div>
@@ -226,7 +373,7 @@ export default function AnniversaryForm() {
           </div>
 
           {isDeleteMode ? (
-            <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
+            <div className={`bg-white rounded-2xl shadow-xl p-8 mb-8 ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
               <h2 className="text-2xl font-bold text-red-600 mb-4">予定を削除</h2>
               <div className="space-y-4">
                 <div>
@@ -240,13 +387,14 @@ export default function AnniversaryForm() {
                     className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
                     placeholder="例：family-calendar"
                     required
+                    disabled={isLoading}
                   />
                 </div>
                 <div className="flex gap-4">
                   <button
                     onClick={() => setShowDeleteConfirmation(true)}
                     className="flex-1 bg-red-500 text-white py-3 px-6 rounded-xl text-lg font-bold hover:bg-red-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={!deleteCalendarId}
+                    disabled={!deleteCalendarId || isLoading}
                   >
                     <Trash2 className="w-6 h-6" />
                     削除する
@@ -256,7 +404,8 @@ export default function AnniversaryForm() {
                       setIsDeleteMode(false);
                       setDeleteCalendarId('');
                     }}
-                    className="flex-1 bg-gray-200 text-gray-700 py-3 px-6 rounded-xl text-lg font-bold hover:bg-gray-300 transform hover:scale-105 transition-all duration-300"
+                    className="flex-1 bg-gray-200 text-gray-700 py-3 px-6 rounded-xl text-lg font-bold hover:bg-gray-300 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isLoading}
                   >
                     キャンセル
                   </button>
