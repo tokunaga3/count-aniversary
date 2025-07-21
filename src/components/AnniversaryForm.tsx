@@ -177,24 +177,36 @@ export default function AnniversaryForm() {
                 </div>
 
                 <div>
-                  <label className="block text-lg font-medium text-blue-600 mb-2">
+                  <label className="text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
                     タイトル ✨
+                    <div className="group relative">
+                      <Info className="w-5 h-5 text-gray-400 cursor-help" />
+                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-80 p-3 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+                        <div className="text-xs font-semibold mb-2">使用可能なプレースホルダー：</div>
+                        <div className="space-y-1 text-xs">
+                          <div><strong>{'{{count}}'}</strong>：通し番号（1〜）</div>
+                          <div><strong>{'{{years}}'}</strong>：経過年数</div>
+                          <div><strong>{'{{months}}'}</strong>：残りの月数（0〜11）</div>
+                          <div><strong>{'{{ym}}'}</strong>：X年Yヶ月形式</div>
+                        </div>
+                      </div>
+                    </div>
                   </label>
                   <input
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
-                    placeholder="結婚"
+                    placeholder="例：結婚{{ym}}記念日💍、祝！{{years}}年{{months}}ヶ月記念"
                   />
-                  <p>カウント</p>
-                  <input
-                    type="text"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
-                    placeholder="回目の記念日"
-                  />
+                  <div className="mt-2 text-sm text-gray-600">
+                    <div className="font-semibold mb-1">プレースホルダー例：</div>
+                    <div className="space-y-1 text-xs">
+                      <div>• <code className="bg-gray-100 px-1 rounded">結婚{'{{count}}'}ヶ月目記念日🎉</code> → 結婚13ヶ月目記念日🎉</div>
+                      <div>• <code className="bg-gray-100 px-1 rounded">結婚{'{{ym}}'}記念日💍</code> → 結婚1年1ヶ月記念日💍</div>
+                      <div>• <code className="bg-gray-100 px-1 rounded">祝！{'{{years}}'}年{'{{months}}'}ヶ月記念</code> → 祝！1年1ヶ月記念</div>
+                    </div>
+                  </div>
                 </div>
 
                 <div>
@@ -211,27 +223,7 @@ export default function AnniversaryForm() {
                 </div>
 
                 <div>
-                  <label className="block text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
-                    カウントタイプ 🔄
-                    <div className="group relative">
-                      <Info className="w-5 h-5 text-gray-400 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
-                        記念日を年単位または月単位でカウントします。
-                      </div>
-                    </div>
-                  </label>
-                  <select
-                    value={countType}
-                    onChange={(e) => setCountType(e.target.value as 'years' | 'months')}
-                    className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
-                  >
-                    <option value="years">年単位</option>
-                    <option value="months">月単位</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
+                  <label className="text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
                     記録回数 🔢
                     <div className="group relative">
                       <Info className="w-5 h-5 text-gray-400 cursor-help" />
