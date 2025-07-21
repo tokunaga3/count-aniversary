@@ -3,33 +3,46 @@ import LoginButton from "@/components/LoginButton";
 import LogoutButton from "@/components/LogoutButton";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { Star } from 'lucide-react';
 
 export default async function Home() {
   const session = await getServerSession(authOptions);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-100 via-blue-50 to-sky-100">
-      <div className="p-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex justify-between items-center mb-8">
-            <div>
-              <h1 className="text-3xl font-bold text-blue-600">記念日登録アプリ</h1>
-              {session && (
-                <p className="text-blue-500 mt-2">
-                  ログイン中: <span className="font-medium">{session.user?.email}</span>
-                </p>
-              )}
+      <div className="container mx-auto px-6 max-w-7xl py-8">
+        {/* ヘッダーセクション */}
+        <header className="mb-12 animate-fade-in">
+          <h1 className="text-4xl md:text-5xl font-bold text-blue-600 mb-4 flex items-center gap-3">
+            <Star className="text-yellow-400 animate-pulse w-8 h-8 md:w-10 md:h-10" />
+            思い出カレンダー
+            <Star className="text-yellow-400 animate-pulse w-8 h-8 md:w-10 md:h-10" />
+          </h1>
+          <p className="text-blue-500 text-lg md:text-xl mb-8">楽しい予定と大切な記念日をメモしよう！</p>
+          
+          {/* ログイン情報と操作ボタンを水平に配置 */}
+          {session && (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 bg-white/50 rounded-lg px-6 py-4 backdrop-blur-sm">
+              <p className="text-blue-600 text-base md:text-lg">
+                ログイン中: <span className="font-semibold">{session.user?.email}</span>
+              </p>
+              <LogoutButton />
             </div>
-            <div>
-              {session ? <LogoutButton /> : <LoginButton />}
-            </div>
-          </div>
+          )}
+        </header>
 
+        {/* メインコンテンツ */}
+        <div className="space-y-8">
           {session ? (
-            <AnniversaryForm />
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+              <AnniversaryForm />
+            </div>
           ) : (
-            <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
-              <p className="text-xl text-blue-600">Googleアカウントでログインしてください。</p>
+            <div className="bg-white rounded-2xl shadow-xl p-8 text-center max-w-lg mx-auto">
+              <p className="text-xl text-blue-600 mb-4">Googleアカウントでログインしてください。</p>
+              <div className="flex justify-center">
+                <LoginButton />
+              </div>
             </div>
           )}
         </div>

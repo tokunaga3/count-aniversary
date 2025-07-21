@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { Calendar, Star, Trash2, Loader2 } from 'lucide-react';
-import { signOut } from 'next-auth/react';
+import { Calendar, Trash2, Loader2, Info } from 'lucide-react';
 
 interface SpecialDate {
   id: string;
@@ -110,17 +109,7 @@ export default function AnniversaryForm() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-blue-50 to-sky-100">
-      <div className="p-8">
-        <div className="max-w-4xl mx-auto">
           <div className="flex justify-between items-center mb-8">
-            <div className="text-center animate-fade-in">
-              <h1 className="text-4xl font-bold text-blue-600 mb-2 flex items-center justify-center gap-2">
-                <Star className="text-yellow-400 animate-pulse" />
-                思い出カレンダー
-                <Star className="text-yellow-400 animate-pulse" />
-              </h1>
-              <p className="text-blue-500 text-lg">楽しい予定と大切な記念日をメモしよう！</p>
-            </div>
             <div className="flex gap-4">
               <button
                 onClick={() => setIsDeleteMode(true)}
@@ -128,12 +117,6 @@ export default function AnniversaryForm() {
               >
                 <Trash2 className="w-4 h-4" />
                 予定を削除
-              </button>
-              <button
-                onClick={() => signOut()}
-                className="bg-gray-500 text-white py-2 px-4 rounded-lg text-sm font-bold hover:bg-gray-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2"
-              >
-                ログアウト
               </button>
             </div>
           </div>
@@ -195,14 +178,22 @@ export default function AnniversaryForm() {
 
                 <div>
                   <label className="block text-lg font-medium text-blue-600 mb-2">
-                    タイトル ✨ (空白にすると「🎉 #回目の記念日 🎉」となります)
+                    タイトル ✨
                   </label>
                   <input
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
-                    placeholder="例：誕生日パーティー🎉"
+                    placeholder="結婚"
+                  />
+                  <p>カウント</p>
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
+                    placeholder="回目の記念日"
                   />
                 </div>
 
@@ -220,12 +211,18 @@ export default function AnniversaryForm() {
                 </div>
 
                 <div>
-                  <label className="block text-lg font-medium text-blue-600 mb-2">
+                  <label className="block text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
                     カウントタイプ 🔄
+                    <div className="group relative">
+                      <Info className="w-5 h-5 text-gray-400 cursor-help" />
+                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+                        記念日を年単位または月単位でカウントします。
+                      </div>
+                    </div>
                   </label>
                   <select
                     value={countType}
-                    onChange={(e) => setCountType(e.target.value as 'years' | 'months' | 'yearsAndMonths')}
+                    onChange={(e) => setCountType(e.target.value as 'years' | 'months')}
                     className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
                   >
                     <option value="years">年単位</option>
@@ -234,8 +231,14 @@ export default function AnniversaryForm() {
                 </div>
 
                 <div>
-                  <label className="block text-lg font-medium text-blue-600 mb-2">
+                  <label className="block text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
                     記録回数 🔢
+                    <div className="group relative">
+                      <Info className="w-5 h-5 text-gray-400 cursor-help" />
+                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+                        記念日を何回分記録するかを指定します。1から100までの値を設定できます。
+                      </div>
+                    </div>
                   </label>
                   <input
                     type="number"
@@ -258,7 +261,6 @@ export default function AnniversaryForm() {
                     className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
                     placeholder="楽しい予定の詳細を書いてね！"
                     rows={3}
-                    required
                   />
                 </div>
 
@@ -319,8 +321,6 @@ export default function AnniversaryForm() {
               </div>
             </div>
           )}
-        </div>
-      </div>
     </div>
   );
 }
