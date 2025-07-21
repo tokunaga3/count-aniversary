@@ -19,9 +19,10 @@ export default function AnniversaryForm() {
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
   const [description, setDescription] = useState('');
-  const [countType, setCountType] = useState<'years' | 'months' | 'yearsAndMonths'>('years');
   const [endDate, setEndDate] = useState('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [progress, setProgress] = useState<number>(0);
+  const [progressMessage, setProgressMessage] = useState<string>('');
   const [deleteCalendarId, setDeleteCalendarId] = useState<string>('');
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState<boolean>(false);
   const [isDeleteMode, setIsDeleteMode] = useState<boolean>(false);
@@ -31,16 +32,46 @@ export default function AnniversaryForm() {
     e.preventDefault();
     if (!date || !calendarId || !endDate) return;
     setIsLoading(true);
+    setProgress(0);
+    setProgressMessage('記念日の登録を開始しています...');
+    
     try {
-      const intervalType = countType === 'years' ? 'yearly' : 'monthly';
+      const intervalType = 'monthly'; // 月単位固定
       const titleToSend = title.trim() === '' ? '🎉 #回目の記念日 🎉' : title;
+      
+      // 予定される記念日の総数を計算（概算）
+      const startDateTime = new Date(date);
+      const endDateTime = new Date(endDate);
+      const monthsDiff = (endDateTime.getFullYear() - startDateTime.getFullYear()) * 12 + 
+                        (endDateTime.getMonth() - startDateTime.getMonth()) + 1;
+      
       console.log('Sending data to API:', {
         startDate: date,
         endDate: endDate,
         intervalType,
         comment: description,
         calenderId: calendarId,
-        title: titleToSend
+        title: titleToSend,
+        estimatedCount: monthsDiff
+      });
+
+      // 進捗シミュレーション（より詳細に）
+      setProgressMessage(`約${monthsDiff}件の記念日を登録準備中...`);
+      setProgress(10);
+
+      // 段階的進捗更新
+      const progressSteps = [
+        { delay: 300, progress: 20, message: 'カレンダー接続中...' },
+        { delay: 600, progress: 35, message: `${monthsDiff}件の記念日を処理中...` },
+        { delay: 1200, progress: 55, message: '記念日データを生成中...' },
+        { delay: 1800, progress: 75, message: 'カレンダーに登録中...' }
+      ];
+
+      progressSteps.forEach(step => {
+        setTimeout(() => {
+          setProgress(step.progress);
+          setProgressMessage(step.message);
+        }, step.delay);
       });
       
       const response = await fetch("/api/anniversary", {
@@ -56,14 +87,20 @@ export default function AnniversaryForm() {
         }),
       });
 
+      setProgress(90);
+      setProgressMessage('最終処理中...');
+
       if (response.ok) {
+        setProgress(100);
+        setProgressMessage('🎉 登録完了！');
+        
         const newDate: SpecialDate = {
           id: crypto.randomUUID(),
           calendarId,
           title: titleToSend || '🎉 #回目の記念日 🎉',
           date,
           description,
-          countType,
+          countType: 'months', // 月単位固定
           repeatCount: 0 // 使用しないが型定義のため
         };
         setSpecialDates([...specialDates, newDate]);
@@ -72,14 +109,25 @@ export default function AnniversaryForm() {
         setDate('');
         setEndDate('');
         setDescription('');
-        alert("記念日を追加しました！");
+        
+        // 完了アニメーションを少し長めに表示
+        setTimeout(() => {
+          setProgress(0);
+          setProgressMessage('');
+          setIsLoading(false);
+          alert(`${monthsDiff}件の記念日を登録しました！`);
+        }, 2000);
       } else {
+        setProgress(0);
+        setProgressMessage('');
+        setIsLoading(false);
         alert("エラーが発生しました");
       }
     } catch {
-      alert("エラーが発生しました");
-    } finally {
+      setProgress(0);
+      setProgressMessage('');
       setIsLoading(false);
+      alert("エラーが発生しました");
     }
   };
 
@@ -109,6 +157,62 @@ export default function AnniversaryForm() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-blue-50 to-sky-100">
+      {/* 進捗バーオーバーレイ */}
+      {isLoading && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 transform scale-100 transition-all duration-300">
+            <div className="text-center space-y-4">
+              {/* アニメーション付きローダー */}
+              <div className="flex justify-center mb-4">
+                <div className="relative">
+                  <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+                  <div className="absolute inset-0 w-12 h-12 border-2 border-blue-200 rounded-full animate-pulse"></div>
+                </div>
+              </div>
+              
+              {/* 進捗メッセージ */}
+              <h3 className="text-xl font-bold text-gray-800">{progressMessage}</h3>
+              
+              {/* 進捗パーセンテージ */}
+              <div className="text-lg font-semibold text-blue-600">
+                {progress}%完了
+              </div>
+              
+              {/* 進捗バー */}
+              <div className="space-y-2">
+                <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                  <div 
+                    className="bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-600 h-4 rounded-full transition-all duration-700 ease-out relative overflow-hidden"
+                    style={{ width: `${progress}%` }}
+                  >
+                    {/* 進捗バーのアニメーション効果 */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-30 animate-pulse"></div>
+                  </div>
+                </div>
+                
+                {/* 進捗ステップ表示 */}
+                <div className="flex justify-between text-xs text-gray-500 mt-2">
+                  <span className={progress >= 10 ? "text-blue-600 font-semibold" : ""}>開始</span>
+                  <span className={progress >= 30 ? "text-blue-600 font-semibold" : ""}>処理中</span>
+                  <span className={progress >= 60 ? "text-blue-600 font-semibold" : ""}>登録中</span>
+                  <span className={progress >= 90 ? "text-blue-600 font-semibold" : ""}>最終処理</span>
+                  <span className={progress >= 100 ? "text-green-600 font-semibold" : ""}>完了</span>
+                </div>
+              </div>
+              
+              {/* 完了時のアニメーション */}
+              {progress === 100 && (
+                <div className="text-green-600 animate-bounce">
+                  <div className="text-2xl">✅</div>
+                  <div className="text-sm font-medium">登録完了！</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      <div className="container mx-auto p-6">
           <div className="flex justify-between items-center mb-8">
             <div className="flex gap-4">
               <button
@@ -160,7 +264,7 @@ export default function AnniversaryForm() {
               </div>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl shadow-xl p-8 mb-8 transform hover:scale-[1.02] transition-transform duration-300">
+            <div className={`bg-white rounded-2xl shadow-xl p-8 mb-8 transform hover:scale-[1.02] transition-transform duration-300 ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
               <form onSubmit={addSpecialDate} className="space-y-4">
                 <div>
                   <label className="block text-lg font-medium text-blue-600 mb-2">
@@ -254,6 +358,8 @@ export default function AnniversaryForm() {
                   />
                 </div>
 
+
+
                 <button
                   type="submit"
                   className="w-full bg-blue-500 text-white py-3 px-6 rounded-xl text-lg font-bold hover:bg-blue-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -311,6 +417,7 @@ export default function AnniversaryForm() {
               </div>
             </div>
           )}
+      </div>
     </div>
   );
 }
