@@ -20,7 +20,7 @@ export default function AnniversaryForm() {
   const [date, setDate] = useState('');
   const [description, setDescription] = useState('');
   const [countType, setCountType] = useState<'years' | 'months' | 'yearsAndMonths'>('years');
-  const [repeatCount, setRepeatCount] = useState(1);
+  const [endDate, setEndDate] = useState('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [deleteCalendarId, setDeleteCalendarId] = useState<string>('');
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState<boolean>(false);
@@ -29,15 +29,15 @@ export default function AnniversaryForm() {
 
   const addSpecialDate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date || !calendarId) return;
+    if (!date || !calendarId || !endDate) return;
     setIsLoading(true);
     try {
       const intervalType = countType === 'years' ? 'yearly' : 'monthly';
       const titleToSend = title.trim() === '' ? '🎉 #回目の記念日 🎉' : title;
       console.log('Sending data to API:', {
         startDate: date,
+        endDate: endDate,
         intervalType,
-        count: repeatCount,
         comment: description,
         calenderId: calendarId,
         title: titleToSend
@@ -48,8 +48,8 @@ export default function AnniversaryForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           startDate: date,
+          endDate: endDate,
           intervalType,
-          count: repeatCount,
           comment: description,
           calenderId: calendarId,
           title: titleToSend
@@ -64,14 +64,14 @@ export default function AnniversaryForm() {
           date,
           description,
           countType,
-          repeatCount
+          repeatCount: 0 // 使用しないが型定義のため
         };
         setSpecialDates([...specialDates, newDate]);
         setCalendarId('');
         setTitle('');
         setDate('');
+        setEndDate('');
         setDescription('');
-        setRepeatCount(1);
         alert("記念日を追加しました！");
       } else {
         alert("エラーが発生しました");
@@ -224,20 +224,18 @@ export default function AnniversaryForm() {
 
                 <div>
                   <label className="text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
-                    記録回数 🔢
+                    終了日 �
                     <div className="group relative">
                       <Info className="w-5 h-5 text-gray-400 cursor-help" />
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
-                        記念日を何回分記録するかを指定します。1から100までの値を設定できます。
+                        記念日の生成をいつまで続けるかを指定します。この日付まで月単位で記念日が作成されます。
                       </div>
                     </div>
                   </label>
                   <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={repeatCount}
-                    onChange={(e) => setRepeatCount(parseInt(e.target.value))}
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
                     className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
                     required
                   />
