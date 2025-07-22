@@ -1,20 +1,16 @@
 "use client";
 
-import { signIn, signOut, useSession } from "next-auth/react";
+import { LogIn } from 'lucide-react';
+import { signIn } from 'next-auth/react';
 
 export default function LoginButton() {
-  const { data: session } = useSession();
-
   return (
-    <div>
-      {session ? (
-        <>
-          <p>ログイン中: {session.user?.email}</p>
-          <button onClick={() => signOut()}>ログアウト</button>
-        </>
-      ) : (
-        <button onClick={() => signIn("google")}>Googleでログイン</button>
-      )}
-    </div>
+    <button
+      onClick={() => signIn('google', { callbackUrl: '/calendar-setup' })}
+      className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white hover:bg-blue-600 font-medium rounded-lg transition-colors duration-300"
+    >
+      <LogIn className="w-5 h-5" />
+      Googleでログイン
+    </button>
   );
 }
