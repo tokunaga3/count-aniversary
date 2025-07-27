@@ -32,6 +32,7 @@ export default function AnniversaryForm() {
     currentDate: string;
     summary: string;
     remaining?: number;
+    batchInfo?: string; // バッチ処理情報を追加
   }>({
     current: 0,
     total: 0,
@@ -331,7 +332,8 @@ export default function AnniversaryForm() {
       current: 0,
       total: 0,
       currentDate: '',
-      summary: '削除準備中...'
+      summary: '削除準備中...',
+      batchInfo: ''
     });
     
     // 開発環境でもSSEを有効にして詳細な進捗表示をテスト
@@ -379,13 +381,14 @@ export default function AnniversaryForm() {
             setProgress(data.progress);
             setProgressMessage(data.message);
             
-            // 削除処理の詳細進捗情報を更新（残り件数を含む）
+            // 削除処理の詳細進捗情報を更新（残り件数とバッチ情報を含む）
             setCurrentProcessing({
               current: data.current || 0,
               total: data.total || 0,
               currentDate: data.currentDate || '',
               summary: data.summary || data.eventTitle || '削除処理中',
-              remaining: data.remaining || 0
+              remaining: data.remaining || 0,
+              batchInfo: data.batchInfo || '' // バッチ情報を追加
             });
             
             // より詳細な進捗メッセージに更新
@@ -413,8 +416,9 @@ export default function AnniversaryForm() {
               current: data.current || data.deletedCount || 0,
               total: data.total || data.deletedCount || 0,
               currentDate: '',
-              summary: data.summary || `${data.deletedCount || 0}件の記念日の削除が完了しました`,
-              remaining: 0
+              summary: data.summary || `${data.deletedCount || 0}件の記念日の並列削除が完了しました`,
+              remaining: 0,
+              batchInfo: '全バッチ処理完了'
             });
             
             setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
@@ -432,7 +436,8 @@ export default function AnniversaryForm() {
                 total: 0,
                 currentDate: '',
                 summary: '',
-                remaining: 0
+                remaining: 0,
+                batchInfo: ''
               });
               setIsLoading(false);
               alert(`${data.deletedCount || 0}件の予定を削除しました！`);
@@ -450,7 +455,8 @@ export default function AnniversaryForm() {
                 current: 0,
                 total: 0,
                 currentDate: '',
-                summary: ''
+                summary: '',
+                batchInfo: ''
               });
               setIsLoading(false);
               setShowDeleteConfirmation(false);
@@ -525,42 +531,52 @@ export default function AnniversaryForm() {
         const result = await response.json();
         const deletedCount = result.deletedCount || 0;
         
-        // 削除中の進捗をシミュレート（フォールバック）
+        // 削除中の進捗をシミュレート（並列処理フォールバック）
         if (deletedCount > 0) {
           setCurrentProcessing({
             current: 0,
             total: deletedCount,
             currentDate: '',
-            summary: `${deletedCount}件の記念日を削除中...`,
-            remaining: deletedCount
+            summary: `${deletedCount}件の記念日を並列削除中...`,
+            remaining: deletedCount,
+            batchInfo: '通常処理モード（並列化）'
           });
           
-          // 進捗を段階的に更新
-          for (let i = 1; i <= deletedCount; i++) {
-            await new Promise(resolve => setTimeout(resolve, 100)); // 少し遅延
-            const progress = 30 + Math.floor((i / deletedCount) * 60); // 30%から90%まで
-            const remaining = deletedCount - i;
+          // 並列処理をシミュレート（5件ずつのバッチ）
+          const BATCH_SIZE = 5;
+          const batches = Math.ceil(deletedCount / BATCH_SIZE);
+          
+          for (let batch = 1; batch <= batches; batch++) {
+            const currentBatchSize = Math.min(BATCH_SIZE, deletedCount - (batch - 1) * BATCH_SIZE);
+            const processedSoFar = (batch - 1) * BATCH_SIZE + currentBatchSize;
+            const remaining = deletedCount - processedSoFar;
+            
+            await new Promise(resolve => setTimeout(resolve, 300)); // バッチ処理の遅延をシミュレート
+            
+            const progress = 30 + Math.floor((processedSoFar / deletedCount) * 60); // 30%から90%まで
             
             setProgress(progress);
-            setProgressMessage(`削除中: ${i}/${deletedCount}件 (${Math.round((i/deletedCount)*100)}%) - 残り${remaining}件`);
+            setProgressMessage(`並列削除中: ${processedSoFar}/${deletedCount}件 (${Math.round((processedSoFar/deletedCount)*100)}%) - バッチ${batch}/${batches}完了`);
             setCurrentProcessing({
-              current: i,
+              current: processedSoFar,
               total: deletedCount,
               currentDate: new Date().toLocaleDateString('ja-JP'),
-              summary: `記念日 ${i}件目を削除中...`,
-              remaining: remaining
+              summary: `バッチ${batch}/${batches}: ${currentBatchSize}件並列削除完了`,
+              remaining: remaining,
+              batchInfo: `バッチ${batch}/${batches} (${currentBatchSize}件並列処理)`
             });
           }
         }
         
         setProgress(100);
-        setProgressMessage(`🗑️ 削除完了！ ${deletedCount}件の記念日を削除しました`);
+        setProgressMessage(`🗑️ 並列削除完了！ ${deletedCount}件の記念日を削除しました`);
         setCurrentProcessing({
           current: deletedCount,
           total: deletedCount,
           currentDate: '',
-          summary: `${deletedCount}件の記念日の削除が完了しました`,
-          remaining: 0
+          summary: `${deletedCount}件の記念日の並列削除が完了しました`,
+          remaining: 0,
+          batchInfo: '全バッチ処理完了'
         });
         
         setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
@@ -740,6 +756,29 @@ export default function AnniversaryForm() {
                           <span className="text-sm font-medium text-gray-600">
                             全{currentProcessing.total}件
                           </span>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* バッチ処理情報表示 */}
+                    {currentProcessing.batchInfo && (
+                      <div className={`rounded-lg p-3 border-2 ${
+                        progressMessage.includes('削除') 
+                          ? 'bg-purple-50 border-purple-200' 
+                          : 'bg-indigo-50 border-indigo-200'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">並列処理状況:</span>
+                          <div className="text-right">
+                            <span className={`text-lg font-bold ${
+                              progressMessage.includes('削除') ? 'text-purple-600' : 'text-indigo-600'
+                            }`}>
+                              {currentProcessing.batchInfo}
+                            </span>
+                            <div className="text-xs text-gray-500">
+                              {progressMessage.includes('削除') ? '5件ずつ並列削除中' : '並列処理中'}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}

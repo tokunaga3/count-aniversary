@@ -301,62 +301,94 @@ export async function GET(req: NextRequest) {
                 current: 0,
                 total: eventCount,
                 currentDate: '',
-                summary: `${eventCount}件の記念日の削除を開始します`,
+                summary: `${eventCount}件の記念日の並列削除を開始します`,
                 remaining: eventCount
               })}\n\n`));
               
-              // 各イベントを削除
-              for (let i = 0; i < events.length; i++) {
+              // 並列削除処理の設定
+              const BATCH_SIZE = 5; // 同時実行数（レート制限対策）
+              const DELAY_BETWEEN_BATCHES = 1000; // バッチ間の遅延（ミリ秒）
+              const RETRY_DELAY = 500; // リトライ時の遅延
+              
+              // イベントをバッチに分割
+              const batches: typeof events[] = [];
+              for (let i = 0; i < events.length; i += BATCH_SIZE) {
+                batches.push(events.slice(i, i + BATCH_SIZE));
+              }
+              
+              console.log(`Total ${eventCount} events divided into ${batches.length} batches of ${BATCH_SIZE} each`);
+              
+              // 各バッチを並列処理
+              for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
                 // ストリームが閉じられている場合は処理を中断
                 if (isControllerClosed) {
                   console.log('Stream closed, stopping deletion process');
                   break;
                 }
                 
-                const event = events[i];
+                const batch = batches[batchIndex];
+                console.log(`Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} events`);
                 
-                if (event.id) {
+                // バッチ内のイベントを並列削除
+                const deletePromises = batch.map(async (event, eventIndex) => {
+                  const globalIndex = batchIndex * BATCH_SIZE + eventIndex;
+                  
+                  if (!event.id) {
+                    console.log(`Event ${globalIndex} has no ID, skipping`);
+                    return { success: false, event, globalIndex, error: 'No event ID' };
+                  }
+                  
                   try {
                     await calendar.events.delete({
                       calendarId,
                       eventId: event.id,
                     });
-                    deletedCount++;
-                    console.log(`deleted: ${event.summary}`);
+                    console.log(`Batch ${batchIndex + 1}: deleted event ${globalIndex + 1}: ${event.summary}`);
+                    return { success: true, event, globalIndex };
                   } catch (deleteError: unknown) {
                     const error = deleteError as { status?: number; code?: number };
-                    console.error(`Error deleting event ${event.id}:`, error);
+                    console.error(`Batch ${batchIndex + 1}: Error deleting event ${event.id}:`, error);
                     
-                    // 認証エラーの場合
+                    // 認証エラーの場合は即座に中断
                     if (error.status === 401 || error.code === 401) {
-                      console.log('Authentication error during deletion, aborting');
-                      safeEnqueue(encoder.encode(`data: ${JSON.stringify({
-                        type: 'error',
-                        error: 'auth_expired',
-                        message: '認証が期限切れになりました。再ログインしてください。',
-                        processed: deletedCount,
-                        total: eventCount
-                      })}\n\n`));
-                      
-                      safeClose();
-                      return;
+                      console.log('Authentication error during batch deletion, aborting');
+                      throw new Error('AUTH_EXPIRED');
                     }
                     
                     // その他のエラーの場合は1回再試行
                     try {
-                      await new Promise(resolve => setTimeout(resolve, 1000));
+                      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
                       await calendar.events.delete({
                         calendarId,
                         eventId: event.id,
                       });
-                      deletedCount++;
-                      console.log(`deleted on retry: ${event.summary}`);
+                      console.log(`Batch ${batchIndex + 1}: deleted on retry event ${globalIndex + 1}: ${event.summary}`);
+                      return { success: true, event, globalIndex, retried: true };
                     } catch (retryError: unknown) {
                       const retryErr = retryError as { status?: number; code?: number };
-                      console.error(`Retry failed for event ${event.id}:`, retryErr);
+                      console.error(`Batch ${batchIndex + 1}: Retry failed for event ${event.id}:`, retryErr);
                       
                       if (retryErr.status === 401 || retryErr.code === 401) {
                         console.log('Authentication error on retry, aborting');
+                        throw new Error('AUTH_EXPIRED');
+                      }
+                      
+                      return { success: false, event, globalIndex, error: retryErr };
+                    }
+                  }
+                });
+                
+                try {
+                  // バッチ内の並列削除を実行
+                  const results = await Promise.allSettled(deletePromises);
+                  
+                  // 結果を処理
+                  for (const result of results) {
+                    if (result.status === 'fulfilled' && result.value.success) {
+                      deletedCount++;
+                    } else if (result.status === 'rejected') {
+                      // 認証エラーの場合は全体を中断
+                      if (result.reason?.message === 'AUTH_EXPIRED') {
                         safeEnqueue(encoder.encode(`data: ${JSON.stringify({
                           type: 'error',
                           error: 'auth_expired',
@@ -368,42 +400,46 @@ export async function GET(req: NextRequest) {
                         safeClose();
                         return;
                       }
-                      
-                      console.log(`Failed to delete event: ${event.summary}, continuing with next event`);
                     }
                   }
+                  
+                  // ストリームが閉じられている場合は進捗送信をスキップ
+                  if (!isControllerClosed) {
+                    // 進捗を送信（20%から90%の範囲で）
+                    const processedBatches = batchIndex + 1;
+                    const progress = Math.min(90, 20 + Math.floor((processedBatches / batches.length) * 70));
+                    const remaining = eventCount - deletedCount;
+                    
+                    // 現在のバッチの最後のイベントの情報を取得
+                    const lastEvent = batch[batch.length - 1];
+                    const eventDate = lastEvent?.start?.dateTime || lastEvent?.start?.date || '';
+                    const currentDateStr = eventDate ? new Date(eventDate).toLocaleDateString('ja-JP') : '';
+                    
+                    const currentEventTitle = lastEvent?.summary ? 
+                      (lastEvent.summary.length > 50 ? lastEvent.summary.substring(0, 50) + '...' : lastEvent.summary) : 
+                      `バッチ${processedBatches}/${batches.length}処理中`;
+                    
+                    safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
+                      type: 'progress', 
+                      progress, 
+                      message: `並列削除中: ${deletedCount}/${eventCount}件 (${Math.round((deletedCount / eventCount) * 100)}%) - バッチ${processedBatches}/${batches.length}完了`,
+                      current: deletedCount,
+                      total: eventCount,
+                      currentDate: currentDateStr,
+                      summary: currentEventTitle,
+                      remaining: remaining,
+                      batchInfo: `バッチ${processedBatches}/${batches.length} (${BATCH_SIZE}件並列処理)`
+                    })}\n\n`));
+                  }
+                  
+                } catch (batchError) {
+                  console.error(`Batch ${batchIndex + 1} processing error:`, batchError);
+                  // バッチエラーの場合も続行（一部のイベントは削除できている可能性があるため）
                 }
                 
-                // ストリームが閉じられている場合は進捗送信をスキップ
-                if (isControllerClosed) {
-                  continue;
-                }
-                
-                // 進捗を送信（20%から90%の範囲で）
-                const progress = Math.min(90, 20 + Math.floor((i + 1) / eventCount * 70));
-                const remaining = eventCount - deletedCount;
-                const eventDate = event.start?.dateTime || event.start?.date || '';
-                const currentDateStr = eventDate ? new Date(eventDate).toLocaleDateString('ja-JP') : '';
-                
-                // 削除中の予定のタイトルを取得（最初の50文字まで）
-                const currentEventTitle = event.summary ? 
-                  (event.summary.length > 50 ? event.summary.substring(0, 50) + '...' : event.summary) : 
-                  '予定を削除中';
-                
-                safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-                  type: 'progress', 
-                  progress, 
-                  message: `削除中: ${deletedCount}/${eventCount}件 (${Math.round((deletedCount / eventCount) * 100)}%)`,
-                  current: deletedCount,
-                  total: eventCount,
-                  currentDate: currentDateStr,
-                  summary: currentEventTitle,
-                  remaining: remaining
-                })}\n\n`));
-                
-                // APIレート制限対策で少し遅延
-                if (i % 5 === 0 && i > 0) {
-                  await new Promise(resolve => setTimeout(resolve, 200));
+                // バッチ間の遅延（最後のバッチ以外）
+                if (batchIndex < batches.length - 1) {
+                  await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
                 }
               }
               
