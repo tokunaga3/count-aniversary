@@ -31,13 +31,13 @@ export default function AnniversaryForm() {
     total: number;
     currentDate: string;
     summary: string;
+    remaining?: number;
   }>({
     current: 0,
     total: 0,
     currentDate: '',
     summary: ''
   });
-  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
 
   const addSpecialDate = async (e: React.FormEvent) => {
@@ -46,6 +46,12 @@ export default function AnniversaryForm() {
     setIsLoading(true);
     setProgress(0);
     setProgressMessage('記念日の登録を開始しています...');
+    setCurrentProcessing({
+      current: 0,
+      total: 0,
+      currentDate: '',
+      summary: ''
+    });
     
     try {
       const intervalType = 'monthly'; // 月単位固定
@@ -67,64 +73,178 @@ export default function AnniversaryForm() {
         estimatedCount: monthsDiff
       });
 
-      // 進捗シミュレーション（より詳細に）
-      setProgressMessage(`約${monthsDiff}件の記念日を登録準備中...`);
-      setProgress(10);
-      setCurrentProcessing({
-        current: 0,
-        total: monthsDiff,
-        currentDate: date,
-        summary: '登録準備中...'
-      });
+      // SSE登録を試行
+      await trySSERegistration(titleToSend, intervalType, monthsDiff);
+      
+    } catch (error) {
+      console.error('記念日登録エラー:', error);
+      setProgressMessage('❌ 登録中にエラーが発生しました');
+      setProgress(0);
+      setIsLoading(false);
+    }
+  };
 
-      // 段階的進捗更新
-      const progressSteps = [
-        { 
-          delay: 300, 
-          progress: 20, 
-          message: 'カレンダー接続中...', 
-          current: 0,
-          currentDate: date,
-          summary: 'カレンダー接続準備中'
-        },
-        { 
-          delay: 600, 
-          progress: 35, 
-          message: `${monthsDiff}件の記念日を処理中...`, 
-          current: Math.floor(monthsDiff * 0.1),
-          currentDate: date,
-          summary: titleToSend
-        },
-        { 
-          delay: 1200, 
-          progress: 55, 
-          message: '記念日データを生成中...', 
-          current: Math.floor(monthsDiff * 0.4),
-          currentDate: date,
-          summary: titleToSend
-        },
-        { 
-          delay: 1800, 
-          progress: 75, 
-          message: 'カレンダーに登録中...', 
-          current: Math.floor(monthsDiff * 0.7),
-          currentDate: date,
-          summary: titleToSend
+  // SSE登録を試行する関数
+  const trySSERegistration = async (titleToSend: string, intervalType: string, estimatedCount: number) => {
+    try {
+      const params = new URLSearchParams({
+        startDate: date,
+        endDate: endDate,
+        intervalType,
+        comment: description,
+        calenderId: calendarId,
+        title: titleToSend,
+        streaming: 'true'
+      });
+      
+      const eventSource = new EventSource(`/api/anniversary?${params.toString()}`);
+      let timeoutId: NodeJS.Timeout | null = null;
+      let lastMessageTime = Date.now();
+      let hasReceivedData = false;
+      
+      // 初期接続タイムアウト（30秒）
+      const setConnectionTimeout = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          console.log('SSE connection timeout - no activity for 2 minutes');
+          eventSource.close();
+          if (hasReceivedData) {
+            console.log('Had received data, continuing with fallback from last position');
+          }
+          performFallbackRegistration(titleToSend, intervalType, estimatedCount);
+        }, 120000); // 2分のアイドルタイムアウト
+      };
+      
+      // 初期タイムアウトを設定（接続確立用）
+      timeoutId = setTimeout(() => {
+        console.log('SSE initial connection timeout - switching to fallback');
+        eventSource.close();
+        performFallbackRegistration(titleToSend, intervalType, estimatedCount);
+      }, 30000);
+      
+      eventSource.onopen = () => {
+        console.log('SSE registration connection opened successfully');
+        setProgressMessage('リアルタイム登録処理に接続中...');
+        // 接続成功後は長めのアイドルタイムアウトに切り替え
+        setConnectionTimeout();
+      };
+      
+      eventSource.onmessage = (event) => {
+        try {
+          console.log('SSE message received:', event.data);
+          const data = JSON.parse(event.data);
+          lastMessageTime = Date.now();
+          hasReceivedData = true;
+          
+          // メッセージ受信時にタイムアウトをリセット
+          setConnectionTimeout();
+          
+          if (data.type === 'progress') {
+            setProgress(data.progress);
+            setProgressMessage(data.message);
+            
+            // 登録処理の詳細進捗情報を更新（残り件数を含む）
+            setCurrentProcessing({
+              current: data.current || 0,
+              total: data.total || 0,
+              currentDate: data.currentDate || date,
+              summary: data.summary || data.eventTitle || '登録処理中',
+              remaining: data.remaining || 0
+            });
+          } else if (data.type === 'complete') {
+            if (timeoutId) clearTimeout(timeoutId);
+            setProgress(100);
+            setProgressMessage('🎉 登録完了！');
+            
+            // 登録完了後の処理
+            const newDate: SpecialDate = {
+              id: crypto.randomUUID(),
+              calendarId,
+              title: titleToSend || '🎉 #回目の記念日 🎉',
+              date,
+              description,
+              countType: 'months',
+              repeatCount: 0
+            };
+            setSpecialDates([...specialDates, newDate]);
+            setCalendarId('');
+            setTitle('');
+            setDate('');
+            setEndDate('');
+            setDescription('');
+            eventSource.close();
+            
+            setTimeout(() => {
+              setProgress(0);
+              setProgressMessage('');
+              setCurrentProcessing({
+                current: 0,
+                total: 0,
+                currentDate: '',
+                summary: ''
+              });
+              setIsLoading(false);
+              alert(`${data.createdCount || estimatedCount}件の記念日を登録しました！`);
+            }, 2000);
+          } else if (data.type === 'error') {
+            if (timeoutId) clearTimeout(timeoutId);
+            eventSource.close();
+            
+            if (data.error === 'auth_expired') {
+              // 認証エラーの場合
+              setProgress(0);
+              setProgressMessage('❌ 認証の期限が切れました');
+              setCurrentProcessing({
+                current: 0,
+                total: 0,
+                currentDate: '',
+                summary: ''
+              });
+              setIsLoading(false);
+              
+              alert(`認証の期限が切れました。${data.processed || 0}件の記念日が登録されました。\n再度ログインしてから残りの登録を行ってください。`);
+              
+              // ログアウトして再認証を促す
+              window.location.href = '/api/auth/signout';
+            } else {
+              // その他のエラーの場合はフォールバック
+              console.error('SSE reported error, switching to fallback');
+              performFallbackRegistration(titleToSend, intervalType, estimatedCount);
+            }
+          }
+        } catch (parseError) {
+          console.error('SSE parse error, switching to fallback:', parseError);
+          if (timeoutId) clearTimeout(timeoutId);
+          eventSource.close();
+          performFallbackRegistration(titleToSend, intervalType, estimatedCount);
         }
-      ];
+      };
+      
+      eventSource.onerror = (error) => {
+        console.error('SSE connection error:', error);
+        console.log('EventSource readyState:', eventSource.readyState);
+        console.log('Time since last message:', Date.now() - lastMessageTime, 'ms');
+        if (timeoutId) clearTimeout(timeoutId);
+        eventSource.close();
+        
+        if (hasReceivedData) {
+          console.log('Had received some data via SSE, continuing with fallback');
+        } else {
+          console.log('No data received via SSE, starting fresh with fallback');
+        }
+        performFallbackRegistration(titleToSend, intervalType, estimatedCount);
+      };
+      
+    } catch (initError) {
+      console.error('Failed to initialize SSE registration, using fallback:', initError);
+      performFallbackRegistration(titleToSend, intervalType, estimatedCount);
+    }
+  };
 
-      progressSteps.forEach(step => {
-        setTimeout(() => {
-          setProgress(step.progress);
-          setProgressMessage(step.message);
-          setCurrentProcessing({
-            current: step.current,
-            total: monthsDiff,
-            currentDate: step.currentDate,
-            summary: step.summary
-          });
-        }, step.delay);
-      });
+  // フォールバック用の通常登録処理（進捗バー付き）
+  const performFallbackRegistration = async (titleToSend: string, intervalType: string, estimatedCount: number) => {
+    try {
+      setProgressMessage('通常の登録方式に切り替えました...');
       
       const response = await fetch("/api/anniversary", {
         method: "POST",
@@ -142,8 +262,8 @@ export default function AnniversaryForm() {
       setProgress(90);
       setProgressMessage('最終処理中...');
       setCurrentProcessing({
-        current: monthsDiff,
-        total: monthsDiff,
+        current: estimatedCount,
+        total: estimatedCount,
         currentDate: endDate,
         summary: '登録完了処理中'
       });
@@ -152,8 +272,8 @@ export default function AnniversaryForm() {
         setProgress(100);
         setProgressMessage('🎉 登録完了！');
         setCurrentProcessing({
-          current: monthsDiff,
-          total: monthsDiff,
+          current: estimatedCount,
+          total: estimatedCount,
           currentDate: endDate,
           summary: '全ての記念日が登録されました'
         });
@@ -164,8 +284,8 @@ export default function AnniversaryForm() {
           title: titleToSend || '🎉 #回目の記念日 🎉',
           date,
           description,
-          countType: 'months', // 月単位固定
-          repeatCount: 0 // 使用しないが型定義のため
+          countType: 'months',
+          repeatCount: 0
         };
         setSpecialDates([...specialDates, newDate]);
         setCalendarId('');
@@ -174,7 +294,6 @@ export default function AnniversaryForm() {
         setEndDate('');
         setDescription('');
         
-        // 完了アニメーションを少し長めに表示
         setTimeout(() => {
           setProgress(0);
           setProgressMessage('');
@@ -185,17 +304,18 @@ export default function AnniversaryForm() {
             summary: ''
           });
           setIsLoading(false);
-          alert(`${monthsDiff}件の記念日を登録しました！`);
+          alert(`${estimatedCount}件の記念日を登録しました！`);
         }, 2000);
       } else {
         setProgress(0);
-        setProgressMessage('');
+        setProgressMessage('❌ 登録に失敗しました');
         setIsLoading(false);
         alert("エラーが発生しました");
       }
-    } catch {
+    } catch (error) {
+      console.error('Fallback registration error:', error);
       setProgress(0);
-      setProgressMessage('');
+      setProgressMessage('❌ 登録中にエラーが発生しました');
       setIsLoading(false);
       alert("エラーが発生しました");
     }
@@ -204,7 +324,6 @@ export default function AnniversaryForm() {
   const handleDeleteByCalendarId = async () => {
     if (!deleteCalendarId) return;
     setIsLoading(true);
-    setIsDeleting(true);
     setProgress(0);
     setProgressMessage('削除処理を開始しています...');
     setCurrentProcessing({
@@ -214,8 +333,8 @@ export default function AnniversaryForm() {
       summary: '削除準備中...'
     });
     
-    // 開発環境用にSSEを試行し、即座にフォールバックするオプション
-    const useSSE = process.env.NODE_ENV === 'production'; // 本番環境でのみSSEを使用
+    // 開発環境でもSSEを有効にして詳細な進捗表示をテスト
+    const useSSE = true; // 常にSSEを使用
     
     if (useSSE) {
       console.log('Attempting SSE connection for delete...');
@@ -250,6 +369,15 @@ export default function AnniversaryForm() {
           if (data.type === 'progress') {
             setProgress(data.progress);
             setProgressMessage(data.message);
+            
+            // 削除処理の詳細進捗情報を更新（残り件数を含む）
+            setCurrentProcessing({
+              current: data.current || 0,
+              total: data.total || 0,
+              currentDate: data.currentDate || '',
+              summary: data.summary || data.eventTitle || '削除処理中',
+              remaining: data.remaining || 0
+            });
           } else if (data.type === 'complete') {
             clearTimeout(timeout);
             setProgress(100);
@@ -269,8 +397,29 @@ export default function AnniversaryForm() {
           } else if (data.type === 'error') {
             clearTimeout(timeout);
             eventSource.close();
-            console.error('SSE reported error, switching to fallback');
-            performFallbackDelete();
+            
+            if (data.error === 'auth_expired') {
+              // 認証エラーの場合
+              setProgress(0);
+              setProgressMessage('❌ 認証の期限が切れました');
+              setCurrentProcessing({
+                current: 0,
+                total: 0,
+                currentDate: '',
+                summary: ''
+              });
+              setIsLoading(false);
+              setShowDeleteConfirmation(false);
+              
+              alert(`認証の期限が切れました。${data.processed || 0}件の予定が削除されました。\n再度ログインしてから残りの削除を行ってください。`);
+              
+              // ログアウトして再認証を促す
+              window.location.href = '/api/auth/signout';
+            } else {
+              // その他のエラーの場合はフォールバック
+              console.error('SSE reported error, switching to fallback');
+              performFallbackDelete();
+            }
           }
         } catch (parseError) {
           console.error('SSE parse error, switching to fallback:', parseError);
@@ -380,7 +529,6 @@ export default function AnniversaryForm() {
             summary: ''
           });
           setIsLoading(false);
-          setIsDeleting(false);
           alert(`${result.deletedCount || 0}件の予定を削除しました！`);
         }, 2000);
       } else {
@@ -394,7 +542,6 @@ export default function AnniversaryForm() {
           summary: ''
         });
         setIsLoading(false);
-        setIsDeleting(false);
         alert(errorData.error || "削除処理でエラーが発生しました");
       }
     } catch (fallbackError) {
@@ -408,7 +555,6 @@ export default function AnniversaryForm() {
         summary: ''
       });
       setIsLoading(false);
-      setIsDeleting(false);
       alert("削除処理でエラーが発生しました");
     }
   };
@@ -493,6 +639,16 @@ export default function AnniversaryForm() {
                         <span className="text-sm font-medium text-gray-600">進捗:</span>
                         <span className="text-lg font-bold text-blue-600">
                           {currentProcessing.current} / {currentProcessing.total}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* 残り件数表示 */}
+                    {currentProcessing.remaining !== undefined && currentProcessing.remaining > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-600">残り:</span>
+                        <span className="text-sm font-semibold text-orange-600">
+                          {currentProcessing.remaining}件
                         </span>
                       </div>
                     )}
