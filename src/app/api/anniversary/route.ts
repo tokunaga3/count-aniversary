@@ -199,12 +199,289 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
+    const action = searchParams.get('action');
+    const calendarId = searchParams.get('calendarId');
+    const streaming = searchParams.get('streaming') === 'true';
+
+    // 削除処理の場合
+    if (action === 'delete') {
+      if (!calendarId) {
+        return NextResponse.json({ error: "Calendar ID is required" }, { status: 400 });
+      }
+
+      const auth = new google.auth.OAuth2();
+      auth.setCredentials({ access_token: session.accessToken });
+
+      const calendar = google.calendar({ version: "v3", auth });
+
+      // ストリーミング対応の場合
+      if (streaming) {
+        console.log('=== 削除SSEストリーム開始 ===');
+        console.log('削除対象カレンダーID:', calendarId);
+        
+        const encoder = new TextEncoder();
+        let deletedCount = 0;
+        
+        const stream = new ReadableStream({
+          async start(controller) {
+            let isControllerClosed = false;
+            
+            // コントローラーが閉じられたかどうかをチェックする関数
+            const safeEnqueue = (data: Uint8Array) => {
+              if (!isControllerClosed) {
+                try {
+                  controller.enqueue(data);
+                } catch (error) {
+                  console.error('Controller enqueue error:', error);
+                  isControllerClosed = true;
+                }
+              }
+            };
+            
+            // コントローラーが閉じられたかをチェックして安全に close する関数
+            const safeClose = () => {
+              if (!isControllerClosed) {
+                try {
+                  controller.close();
+                  isControllerClosed = true;
+                } catch (error) {
+                  console.error('Controller close error:', error);
+                  isControllerClosed = true;
+                }
+              }
+            };
+            
+            try {
+              console.log('削除SSEストリーム処理開始');
+              
+              // 初期メッセージを送信
+              console.log('初期進捗メッセージ送信');
+              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'progress', 
+                progress: 5, 
+                message: '認証を確認中...' 
+              })}\n\n`));
+
+              // カレンダーIDに関連する全てのイベントを取得
+              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'progress', 
+                progress: 10, 
+                message: '削除対象の予定を検索中...' 
+              })}\n\n`));
+
+              const eventsRes = await calendar.events.list({
+                calendarId,
+                timeMin: new Date('1000/1/1').toISOString(),
+                timeMax: new Date('9999/12/31').toISOString(),
+                singleEvents: true,
+                orderBy: "startTime",
+                maxResults: 2500,
+              });
+              
+              const events = eventsRes.data.items || [];
+              const eventCount = events.length;
+              
+              console.log(`Found ${eventCount} events to delete`);
+              
+              if (eventCount === 0) {
+                safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
+                  type: 'complete', 
+                  progress: 100, 
+                  message: '削除対象の予定が見つかりませんでした', 
+                  deletedCount: 0 
+                })}\n\n`));
+                safeClose();
+                return;
+              }
+
+              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'progress', 
+                progress: 20, 
+                message: `削除開始: 0/${eventCount}件 (0%)`,
+                current: 0,
+                total: eventCount,
+                currentDate: '',
+                summary: `${eventCount}件の記念日の削除を開始します`,
+                remaining: eventCount
+              })}\n\n`));
+              
+              // 各イベントを削除
+              for (let i = 0; i < events.length; i++) {
+                // ストリームが閉じられている場合は処理を中断
+                if (isControllerClosed) {
+                  console.log('Stream closed, stopping deletion process');
+                  break;
+                }
+                
+                const event = events[i];
+                
+                if (event.id) {
+                  try {
+                    await calendar.events.delete({
+                      calendarId,
+                      eventId: event.id,
+                    });
+                    deletedCount++;
+                    console.log(`deleted: ${event.summary}`);
+                  } catch (deleteError: unknown) {
+                    const error = deleteError as { status?: number; code?: number };
+                    console.error(`Error deleting event ${event.id}:`, error);
+                    
+                    // 認証エラーの場合
+                    if (error.status === 401 || error.code === 401) {
+                      console.log('Authentication error during deletion, aborting');
+                      safeEnqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: 'error',
+                        error: 'auth_expired',
+                        message: '認証が期限切れになりました。再ログインしてください。',
+                        processed: deletedCount,
+                        total: eventCount
+                      })}\n\n`));
+                      
+                      safeClose();
+                      return;
+                    }
+                    
+                    // その他のエラーの場合は1回再試行
+                    try {
+                      await new Promise(resolve => setTimeout(resolve, 1000));
+                      await calendar.events.delete({
+                        calendarId,
+                        eventId: event.id,
+                      });
+                      deletedCount++;
+                      console.log(`deleted on retry: ${event.summary}`);
+                    } catch (retryError: unknown) {
+                      const retryErr = retryError as { status?: number; code?: number };
+                      console.error(`Retry failed for event ${event.id}:`, retryErr);
+                      
+                      if (retryErr.status === 401 || retryErr.code === 401) {
+                        console.log('Authentication error on retry, aborting');
+                        safeEnqueue(encoder.encode(`data: ${JSON.stringify({
+                          type: 'error',
+                          error: 'auth_expired',
+                          message: '認証が期限切れになりました。再ログインしてください。',
+                          processed: deletedCount,
+                          total: eventCount
+                        })}\n\n`));
+                        
+                        safeClose();
+                        return;
+                      }
+                      
+                      console.log(`Failed to delete event: ${event.summary}, continuing with next event`);
+                    }
+                  }
+                }
+                
+                // ストリームが閉じられている場合は進捗送信をスキップ
+                if (isControllerClosed) {
+                  continue;
+                }
+                
+                // 進捗を送信（20%から90%の範囲で）
+                const progress = Math.min(90, 20 + Math.floor((i + 1) / eventCount * 70));
+                const remaining = eventCount - deletedCount;
+                const eventDate = event.start?.dateTime || event.start?.date || '';
+                const currentDateStr = eventDate ? new Date(eventDate).toLocaleDateString('ja-JP') : '';
+                
+                // 削除中の予定のタイトルを取得（最初の50文字まで）
+                const currentEventTitle = event.summary ? 
+                  (event.summary.length > 50 ? event.summary.substring(0, 50) + '...' : event.summary) : 
+                  '予定を削除中';
+                
+                safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
+                  type: 'progress', 
+                  progress, 
+                  message: `削除中: ${deletedCount}/${eventCount}件 (${Math.round((deletedCount / eventCount) * 100)}%)`,
+                  current: deletedCount,
+                  total: eventCount,
+                  currentDate: currentDateStr,
+                  summary: currentEventTitle,
+                  remaining: remaining
+                })}\n\n`));
+                
+                // APIレート制限対策で少し遅延
+                if (i % 5 === 0 && i > 0) {
+                  await new Promise(resolve => setTimeout(resolve, 200));
+                }
+              }
+              
+              // 完了通知（ストリームが閉じられていない場合のみ）
+              if (!isControllerClosed) {
+                safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
+                  type: 'complete', 
+                  progress: 100, 
+                  message: `削除完了: ${deletedCount}/${eventCount}件 (100%)`, 
+                  current: deletedCount,
+                  total: eventCount,
+                  summary: `${deletedCount}件の記念日を削除しました`,
+                  deletedCount 
+                })}\n\n`));
+              }
+              
+              safeClose();
+            } catch (error) {
+              console.error('❌ 削除SSEストリームエラー:', error);
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'error', 
+                message: errorMessage
+              })}\n\n`));
+              safeClose();
+            }
+          }
+        });
+
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          },
+        });
+      }
+
+      // 通常の削除処理（ストリーミングなし）
+      const eventsRes = await calendar.events.list({
+        calendarId,
+        timeMin: new Date('1000/1/1').toISOString(),
+        timeMax: new Date('9999/12/31').toISOString(),
+        singleEvents: true,
+        orderBy: "startTime",
+        maxResults: 2500,
+      });
+      
+      const events = eventsRes.data.items || [];
+      const eventCount = events.length;
+      
+      console.log(`Found ${eventCount} events to delete`);
+      
+      for (const event of events) {
+        if (event.id) {
+          await calendar.events.delete({
+            calendarId,
+            eventId: event.id,
+          });
+        }
+        console.log(`deleted: ${event.summary}`)
+      }
+      
+      return NextResponse.json({
+        message: "記念日を削除しました！",
+        deletedCount: eventCount,
+      });
+    }
+
+    // 通常のGET処理（登録用SSE）
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
     const comment = searchParams.get('comment');
     const calenderId = searchParams.get('calenderId');
     const title = searchParams.get('title');
-    const streaming = searchParams.get('streaming') === 'true';
 
     if (!startDate || !endDate || !calenderId) {
       return NextResponse.json({ error: "Missing required parameters" }, { status: 400 });
@@ -524,6 +801,9 @@ export async function DELETE(req: NextRequest) {
 
     // ストリーミング対応の場合
     if (streaming) {
+      console.log('=== 削除SSEストリーム開始 ===');
+      console.log('削除対象カレンダーID:', calendarId);
+      
       const encoder = new TextEncoder();
       let deletedCount = 0;
       
@@ -557,9 +837,10 @@ export async function DELETE(req: NextRequest) {
           };
           
           try {
-            console.log('Starting SSE stream for calendar:', calendarId);
+            console.log('削除SSEストリーム処理開始');
             
             // 初期メッセージを送信
+            console.log('初期進捗メッセージ送信');
             safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
               type: 'progress', 
               progress: 5, 
@@ -601,11 +882,11 @@ export async function DELETE(req: NextRequest) {
             safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
               type: 'progress', 
               progress: 20, 
-              message: `${eventCount}件の予定を削除中...`,
+              message: `削除開始: 0/${eventCount}件 (0%)`,
               current: 0,
               total: eventCount,
               currentDate: '',
-              summary: '削除処理を開始します',
+              summary: `${eventCount}件の記念日の削除を開始します`,
               remaining: eventCount
             })}\n\n`));
             
@@ -678,14 +959,19 @@ export async function DELETE(req: NextRequest) {
               const eventDate = event.start?.dateTime || event.start?.date || '';
               const currentDateStr = eventDate ? new Date(eventDate).toLocaleDateString('ja-JP') : '';
               
+              // 削除中の予定のタイトルを取得（最初の50文字まで）
+              const currentEventTitle = event.summary ? 
+                (event.summary.length > 50 ? event.summary.substring(0, 50) + '...' : event.summary) : 
+                '予定を削除中';
+              
               safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
                 type: 'progress', 
                 progress, 
-                message: `${deletedCount}/${eventCount}件削除済み...`,
+                message: `削除中: ${deletedCount}/${eventCount}件 (${Math.round((deletedCount / eventCount) * 100)}%)`,
                 current: deletedCount,
                 total: eventCount,
                 currentDate: currentDateStr,
-                summary: event.summary || '予定を削除中',
+                summary: currentEventTitle,
                 remaining: remaining
               })}\n\n`));
               
@@ -699,13 +985,16 @@ export async function DELETE(req: NextRequest) {
             safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
               type: 'complete', 
               progress: 100, 
-              message: '削除完了！', 
+              message: `削除完了: ${deletedCount}/${eventCount}件 (100%)`, 
+              current: deletedCount,
+              total: eventCount,
+              summary: `${deletedCount}件の記念日を削除しました`,
               deletedCount 
             })}\n\n`));
             
             safeClose();
           } catch (error) {
-            console.error('SSE Stream Error:', error);
+            console.error('❌ 削除SSEストリームエラー:', error);
             const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
             safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
               type: 'error', 

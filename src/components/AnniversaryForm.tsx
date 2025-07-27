@@ -98,29 +98,30 @@ export default function AnniversaryForm() {
       });
       
       const eventSource = new EventSource(`/api/anniversary?${params.toString()}`);
-      let timeoutId: NodeJS.Timeout | null = null;
+      // let timeoutId: NodeJS.Timeout | null = null; // タイムアウト無制限のためコメントアウト
       let lastMessageTime = Date.now();
       let hasReceivedData = false;
       
-      // 初期接続タイムアウト（30秒）
+      // タイムアウトを無制限に設定
       const setConnectionTimeout = () => {
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-          console.log('SSE connection timeout - no activity for 2 minutes');
-          eventSource.close();
-          if (hasReceivedData) {
-            console.log('Had received data, continuing with fallback from last position');
-          }
-          performFallbackRegistration(titleToSend, intervalType, estimatedCount);
-        }, 120000); // 2分のアイドルタイムアウト
+        // if (timeoutId) clearTimeout(timeoutId); // タイムアウト無制限のためコメントアウト
+        // タイムアウトなし - コメントアウト
+        // timeoutId = setTimeout(() => {
+        //   console.log('SSE connection timeout - no activity for 2 minutes');
+        //   eventSource.close();
+        //   if (hasReceivedData) {
+        //     console.log('Had received data, continuing with fallback from last position');
+        //   }
+        //   performFallbackRegistration(titleToSend, intervalType, estimatedCount);
+        // }, 120000); // 2分のアイドルタイムアウト
       };
       
-      // 初期タイムアウトを設定（接続確立用）
-      timeoutId = setTimeout(() => {
-        console.log('SSE initial connection timeout - switching to fallback');
-        eventSource.close();
-        performFallbackRegistration(titleToSend, intervalType, estimatedCount);
-      }, 30000);
+      // 初期タイムアウトを無制限に設定（コメントアウト）
+      // timeoutId = setTimeout(() => {
+      //   console.log('SSE initial connection timeout - switching to fallback');
+      //   eventSource.close();
+      //   performFallbackRegistration(titleToSend, intervalType, estimatedCount);
+      // }, 30000);
       
       eventSource.onopen = () => {
         console.log('SSE registration connection opened successfully');
@@ -152,7 +153,7 @@ export default function AnniversaryForm() {
               remaining: data.remaining || 0
             });
           } else if (data.type === 'complete') {
-            if (timeoutId) clearTimeout(timeoutId);
+            // if (timeoutId) clearTimeout(timeoutId); // タイムアウト無制限のためコメントアウト
             setProgress(100);
             setProgressMessage('🎉 登録完了！');
             
@@ -187,7 +188,7 @@ export default function AnniversaryForm() {
               alert(`${data.createdCount || estimatedCount}件の記念日を登録しました！`);
             }, 2000);
           } else if (data.type === 'error') {
-            if (timeoutId) clearTimeout(timeoutId);
+            // if (timeoutId) clearTimeout(timeoutId); // タイムアウト無制限のためコメントアウト
             eventSource.close();
             
             if (data.error === 'auth_expired') {
@@ -214,7 +215,7 @@ export default function AnniversaryForm() {
           }
         } catch (parseError) {
           console.error('SSE parse error, switching to fallback:', parseError);
-          if (timeoutId) clearTimeout(timeoutId);
+          // if (timeoutId) clearTimeout(timeoutId); // タイムアウト無制限のためコメントアウト
           eventSource.close();
           performFallbackRegistration(titleToSend, intervalType, estimatedCount);
         }
@@ -224,7 +225,7 @@ export default function AnniversaryForm() {
         console.error('SSE connection error:', error);
         console.log('EventSource readyState:', eventSource.readyState);
         console.log('Time since last message:', Date.now() - lastMessageTime, 'ms');
-        if (timeoutId) clearTimeout(timeoutId);
+        // if (timeoutId) clearTimeout(timeoutId); // タイムアウト無制限のためコメントアウト
         eventSource.close();
         
         if (hasReceivedData) {
@@ -348,22 +349,30 @@ export default function AnniversaryForm() {
   // SSE削除を試行する関数
   const trySSEDelete = async () => {
     try {
-      const eventSource = new EventSource(`/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}&streaming=true`);
+      console.log('=== SSE削除処理開始 ===');
+      console.log('削除対象カレンダーID:', deleteCalendarId);
       
-      // 短いタイムアウト（5秒）で早めにフォールバック
-      const timeout = setTimeout(() => {
-        console.log('SSE connection timeout - switching to fallback');
-        eventSource.close();
-        performFallbackDelete();
-      }, 5000);
+      const sseUrl = `/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}&streaming=true&action=delete`;
+      console.log('SSE削除URL:', sseUrl);
+      
+      const eventSource = new EventSource(sseUrl);
+      console.log('EventSource作成完了');
+      
+      // 削除処理用タイムアウトを無制限に設定（コメントアウト）
+      // const timeout = setTimeout(() => {
+      //   console.log('⚠️ SSE削除接続タイムアウト - フォールバックに切り替え');
+      //   eventSource.close();
+      //   performFallbackDelete();
+      // }, 30000);
       
       eventSource.onopen = () => {
-        console.log('SSE connection opened successfully');
-        setProgressMessage('リアルタイム削除処理に接続中...');
+        console.log('✅ SSE削除接続が正常に開始されました');
+        setProgressMessage('リアルタイム削除処理に接続しました...');
       };
       
       eventSource.onmessage = (event) => {
         try {
+          console.log('📨 削除SSEメッセージ受信:', event.data);
           const data = JSON.parse(event.data);
           
           if (data.type === 'progress') {
@@ -378,24 +387,59 @@ export default function AnniversaryForm() {
               summary: data.summary || data.eventTitle || '削除処理中',
               remaining: data.remaining || 0
             });
+            
+            // より詳細な進捗メッセージに更新
+            if (data.current && data.total) {
+              const percentage = Math.round((data.current / data.total) * 100);
+              const remaining = data.total - data.current;
+              setProgressMessage(`削除中: ${data.current}/${data.total}件 (${percentage}%) - 残り${remaining}件`);
+            }
+            
+            console.log('削除進捗更新:', {
+              current: data.current,
+              total: data.total,
+              summary: data.summary,
+              remaining: data.remaining,
+              currentDate: data.currentDate
+            });
           } else if (data.type === 'complete') {
-            clearTimeout(timeout);
+            console.log('✅ 削除完了メッセージ受信');
+            // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
             setProgress(100);
             setProgressMessage('🗑️ 削除完了！');
+            
+            // 完了時の詳細情報を設定
+            setCurrentProcessing({
+              current: data.current || data.deletedCount || 0,
+              total: data.total || data.deletedCount || 0,
+              currentDate: '',
+              summary: data.summary || `${data.deletedCount || 0}件の記念日の削除が完了しました`,
+              remaining: 0
+            });
             
             setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
             setDeleteCalendarId('');
             setShowDeleteConfirmation(false);
+            
+            // EventSourceを閉じる
             eventSource.close();
             
             setTimeout(() => {
               setProgress(0);
               setProgressMessage('');
+              setCurrentProcessing({
+                current: 0,
+                total: 0,
+                currentDate: '',
+                summary: '',
+                remaining: 0
+              });
               setIsLoading(false);
               alert(`${data.deletedCount || 0}件の予定を削除しました！`);
-            }, 2000);
+            }, 3000);
           } else if (data.type === 'error') {
-            clearTimeout(timeout);
+            console.log('❌ 削除エラーメッセージ受信:', data);
+            // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
             eventSource.close();
             
             if (data.error === 'auth_expired') {
@@ -422,29 +466,32 @@ export default function AnniversaryForm() {
             }
           }
         } catch (parseError) {
-          console.error('SSE parse error, switching to fallback:', parseError);
-          clearTimeout(timeout);
+          console.error('❌ SSE parse error, switching to fallback:', parseError);
+          // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
           eventSource.close();
           performFallbackDelete();
         }
       };
       
-      eventSource.onerror = () => {
-        console.log('SSE connection error, switching to fallback immediately');
-        clearTimeout(timeout);
+      eventSource.onerror = (error) => {
+        console.log('❌ SSE削除接続エラー:', error);
+        console.log('EventSource readyState:', eventSource.readyState);
+        console.log('即座にフォールバックに切り替えます');
+        // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
         eventSource.close();
         performFallbackDelete();
       };
       
     } catch (initError) {
-      console.error('Failed to initialize SSE, using fallback:', initError);
+      console.error('❌ SSE削除初期化失敗, フォールバックを使用:', initError);
       performFallbackDelete();
     }
   };
 
-  // フォールバック用の通常削除処理（進捗バー付き）
+  // フォールバック用の通常削除処理（詳細進捗バー付き）
   const performFallbackDelete = async () => {
     try {
+      console.log('フォールバック削除処理を開始');
       setIsLoading(true);
       setProgress(10);
       setProgressMessage('削除対象の予定を検索中...');
@@ -452,67 +499,68 @@ export default function AnniversaryForm() {
         current: 0,
         total: 0,
         currentDate: '',
-        summary: '削除対象を検索中'
+        summary: '削除対象を検索中',
+        remaining: 0
       });
       
-      // 段階的な進捗シミュレーション
-      const deleteSteps = [
-        { 
-          delay: 200, 
-          progress: 20, 
-          message: 'カレンダーに接続中...',
-          current: 0,
-          summary: 'カレンダー接続中'
-        },
-        { 
-          delay: 500, 
-          progress: 40, 
-          message: '削除対象を特定中...',
-          current: 0,
-          summary: '記念日を検索中'
-        },
-        { 
-          delay: 800, 
-          progress: 60, 
-          message: '予定を削除中...',
-          current: 0,
-          summary: '記念日を削除中'
-        },
-        { 
-          delay: 1200, 
-          progress: 80, 
-          message: '削除処理を完了中...',
-          current: 0,
-          summary: '削除処理完了中'
-        }
-      ];
-
-      deleteSteps.forEach(step => {
-        setTimeout(() => {
-          setProgress(step.progress);
-          setProgressMessage(step.message);
-          setCurrentProcessing({
-            current: step.current,
-            total: 0,
-            currentDate: '',
-            summary: step.summary
-          });
-        }, step.delay);
+      // まず削除対象を取得するAPIコールをシミュレート
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      setProgress(30);
+      setProgressMessage('削除処理を開始しています...');
+      setCurrentProcessing({
+        current: 0,
+        total: 0,
+        currentDate: '',
+        summary: '削除処理準備中',
+        remaining: 0
       });
       
-      const response = await fetch(`/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}`, {
-        method: "DELETE",
+      // 実際の削除リクエスト
+      const response = await fetch(`/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}&action=delete`, {
+        method: "GET",
       });
 
       if (response.ok) {
         const result = await response.json();
+        const deletedCount = result.deletedCount || 0;
+        
+        // 削除中の進捗をシミュレート（フォールバック）
+        if (deletedCount > 0) {
+          setCurrentProcessing({
+            current: 0,
+            total: deletedCount,
+            currentDate: '',
+            summary: `${deletedCount}件の記念日を削除中...`,
+            remaining: deletedCount
+          });
+          
+          // 進捗を段階的に更新
+          for (let i = 1; i <= deletedCount; i++) {
+            await new Promise(resolve => setTimeout(resolve, 100)); // 少し遅延
+            const progress = 30 + Math.floor((i / deletedCount) * 60); // 30%から90%まで
+            const remaining = deletedCount - i;
+            
+            setProgress(progress);
+            setProgressMessage(`削除中: ${i}/${deletedCount}件 (${Math.round((i/deletedCount)*100)}%) - 残り${remaining}件`);
+            setCurrentProcessing({
+              current: i,
+              total: deletedCount,
+              currentDate: new Date().toLocaleDateString('ja-JP'),
+              summary: `記念日 ${i}件目を削除中...`,
+              remaining: remaining
+            });
+          }
+        }
+        
         setProgress(100);
-        setProgressMessage('🗑️ 削除完了！');
+        setProgressMessage(`🗑️ 削除完了！ ${deletedCount}件の記念日を削除しました`);
         setCurrentProcessing({
-          current: result.deletedCount || 0,
-          total: result.deletedCount || 0,
+          current: deletedCount,
+          total: deletedCount,
           currentDate: '',
-          summary: '全ての記念日が削除されました'
+          summary: `${deletedCount}件の記念日の削除が完了しました`,
+          remaining: 0
         });
         
         setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
@@ -526,36 +574,38 @@ export default function AnniversaryForm() {
             current: 0,
             total: 0,
             currentDate: '',
-            summary: ''
+            summary: '',
+            remaining: 0
           });
           setIsLoading(false);
-          alert(`${result.deletedCount || 0}件の予定を削除しました！`);
-        }, 2000);
+          alert(`${deletedCount}件の予定を削除しました！`);
+        }, 3000);
       } else {
-        const errorData = await response.json();
         setProgress(0);
-        setProgressMessage('');
+        setProgressMessage('❌ 削除に失敗しました');
         setCurrentProcessing({
           current: 0,
           total: 0,
           currentDate: '',
-          summary: ''
+          summary: '',
+          remaining: 0
         });
         setIsLoading(false);
-        alert(errorData.error || "削除処理でエラーが発生しました");
+        alert("削除中にエラーが発生しました");
       }
-    } catch (fallbackError) {
-      console.error('Fallback delete failed:', fallbackError);
+    } catch (error) {
+      console.error('フォールバック削除エラー:', error);
       setProgress(0);
-      setProgressMessage('');
+      setProgressMessage('❌ 削除中にエラーが発生しました');
       setCurrentProcessing({
         current: 0,
         total: 0,
         currentDate: '',
-        summary: ''
+        summary: '',
+        remaining: 0
       });
       setIsLoading(false);
-      alert("削除処理でエラーが発生しました");
+      alert("削除中にエラーが発生しました");
     }
   };
 
@@ -631,43 +681,125 @@ export default function AnniversaryForm() {
               
               {/* 詳細進捗情報表示 */}
               {(currentProcessing.total > 0 || currentProcessing.summary) && (
-                <div className="mt-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                  <div className="space-y-2">
-                    {/* 処理数表示 */}
+                <div className={`mt-4 p-4 rounded-lg border ${
+                  progressMessage.includes('削除') 
+                    ? 'bg-gradient-to-r from-red-50 to-pink-50 border-red-200' 
+                    : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200'
+                }`}>
+                  <div className="space-y-3">
+                    {/* 全体進捗表示 - 削除処理用に詳細化 */}
                     {currentProcessing.total > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-600">進捗:</span>
-                        <span className="text-lg font-bold text-blue-600">
-                          {currentProcessing.current} / {currentProcessing.total}
-                        </span>
+                      <div className={`rounded-lg p-4 shadow-sm border-2 ${
+                        progressMessage.includes('削除') 
+                          ? 'bg-red-50 border-red-200' 
+                          : 'bg-blue-50 border-blue-200'
+                      }`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className={`text-lg font-bold ${
+                            progressMessage.includes('削除') ? 'text-red-700' : 'text-blue-700'
+                          }`}>
+                            {progressMessage.includes('削除') ? '🗑️ 削除進捗' : '📝 登録進捗'}
+                          </span>
+                          <div className="text-right">
+                            <div className={`text-2xl font-bold ${
+                              progressMessage.includes('削除') ? 'text-red-600' : 'text-blue-600'
+                            }`}>
+                              {currentProcessing.current} / {currentProcessing.total}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {progressMessage.includes('削除') ? '個削除済み' : '個登録済み'}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* 進捗バー */}
+                        <div className="w-full bg-gray-200 rounded-full h-3 mb-2">
+                          <div 
+                            className={`h-3 rounded-full transition-all duration-500 ${
+                              progressMessage.includes('削除') 
+                                ? 'bg-gradient-to-r from-red-500 to-red-700' 
+                                : 'bg-gradient-to-r from-blue-400 to-blue-600'
+                            }`}
+                            style={{ 
+                              width: currentProcessing.total > 0 
+                                ? `${Math.round((currentProcessing.current / currentProcessing.total) * 100)}%` 
+                                : '0%' 
+                            }}
+                          ></div>
+                        </div>
+                        
+                        <div className="flex justify-between items-center">
+                          <span className={`text-sm font-medium ${
+                            progressMessage.includes('削除') ? 'text-red-600' : 'text-blue-600'
+                          }`}>
+                            {currentProcessing.total > 0 
+                              ? `${Math.round((currentProcessing.current / currentProcessing.total) * 100)}%完了`
+                              : '0%完了'
+                            }
+                          </span>
+                          <span className="text-sm font-medium text-gray-600">
+                            全{currentProcessing.total}件
+                          </span>
+                        </div>
                       </div>
                     )}
                     
-                    {/* 残り件数表示 */}
+                    {/* 残り件数表示 - より目立つように */}
                     {currentProcessing.remaining !== undefined && currentProcessing.remaining > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-600">残り:</span>
-                        <span className="text-sm font-semibold text-orange-600">
-                          {currentProcessing.remaining}件
-                        </span>
+                      <div className={`rounded-lg p-3 border-2 ${
+                        progressMessage.includes('削除') 
+                          ? 'bg-orange-50 border-orange-200' 
+                          : 'bg-yellow-50 border-yellow-200'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">残り件数:</span>
+                          <div className="text-right">
+                            <span className={`text-xl font-bold ${
+                              progressMessage.includes('削除') ? 'text-orange-600' : 'text-yellow-600'
+                            }`}>
+                              {currentProcessing.remaining}件
+                            </span>
+                            <div className="text-xs text-gray-500">
+                              {progressMessage.includes('削除') ? '削除待ち' : '登録待ち'}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
                     
-                    {/* 現在の処理対象 */}
+                    {/* 現在の処理対象 - より詳細に */}
                     {currentProcessing.summary && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-600">状況:</span>
-                        <span className="text-sm text-gray-800 font-medium">
-                          {currentProcessing.summary}
-                        </span>
+                      <div className={`rounded-lg p-4 border-2 ${
+                        progressMessage.includes('削除') 
+                          ? 'bg-red-50 border-red-200' 
+                          : 'bg-green-50 border-green-200'
+                      }`}>
+                        <div className="flex items-start justify-between mb-2">
+                          <span className={`text-sm font-bold ${
+                            progressMessage.includes('削除') ? 'text-red-700' : 'text-green-700'
+                          }`}>
+                            {progressMessage.includes('削除') ? '🗑️ 削除中の予定:' : '📝 現在の処理:'}
+                          </span>
+                        </div>
+                        <div className={`p-3 rounded border ${
+                          progressMessage.includes('削除') 
+                            ? 'bg-white border-red-100' 
+                            : 'bg-white border-green-100'
+                        }`}>
+                          <span className={`text-sm font-medium ${
+                            progressMessage.includes('削除') ? 'text-red-800' : 'text-gray-800'
+                          }`}>
+                            {currentProcessing.summary}
+                          </span>
+                        </div>
                       </div>
                     )}
                     
                     {/* 現在の日付 */}
                     {currentProcessing.currentDate && (
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-600">現在の日付:</span>
-                        <span className="text-sm text-gray-800 font-mono">
+                        <span className="text-sm font-medium text-gray-600">処理日付:</span>
+                        <span className="text-sm text-gray-800 font-mono bg-white px-2 py-1 rounded">
                           {currentProcessing.currentDate}
                         </span>
                       </div>
@@ -676,15 +808,27 @@ export default function AnniversaryForm() {
                 </div>
               )}
               
-              {/* 完了時のアニメーション */}
+              {/* 完了時の詳細アニメーション */}
               {progress === 100 && (
-                <div className={`animate-bounce ${progressMessage.includes('削除') ? 'text-red-600' : 'text-green-600'}`}>
-                  <div className="text-2xl">
+                <div className={`p-4 rounded-lg border-2 text-center ${
+                  progressMessage.includes('削除') 
+                    ? 'bg-red-50 border-red-200 text-red-700' 
+                    : 'bg-green-50 border-green-200 text-green-700'
+                }`}>
+                  <div className="animate-bounce text-3xl mb-2">
                     {progressMessage.includes('削除') ? '🗑️' : '✅'}
                   </div>
-                  <div className="text-sm font-medium">
+                  <div className="text-lg font-bold mb-1">
                     {progressMessage.includes('削除') ? '削除完了！' : '登録完了！'}
                   </div>
+                  {currentProcessing.total > 0 && (
+                    <div className="text-sm font-medium">
+                      {progressMessage.includes('削除') 
+                        ? `${currentProcessing.total}個のイベントの削除が完了しました`
+                        : `${currentProcessing.total}個のイベントの登録が完了しました`
+                      }
+                    </div>
+                  )}
                 </div>
               )}
             </div>
