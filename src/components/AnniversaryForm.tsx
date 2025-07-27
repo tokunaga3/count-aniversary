@@ -26,6 +26,8 @@ export default function AnniversaryForm() {
   const [deleteCalendarId, setDeleteCalendarId] = useState<string>('');
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState<boolean>(false);
   const [isDeleteMode, setIsDeleteMode] = useState<boolean>(false);
+  const [isStoppedByUser, setIsStoppedByUser] = useState<boolean>(false); // ユーザーによる停止状態
+  const [currentEventSource, setCurrentEventSource] = useState<EventSource | null>(null); // 現在のEventSource参照
   const [currentProcessing, setCurrentProcessing] = useState<{
     current: number;
     total: number;
@@ -40,6 +42,53 @@ export default function AnniversaryForm() {
     summary: ''
   });
 
+  // 停止ボタンの処理
+  const handleStopProcessing = () => {
+    console.log('ユーザーによる処理停止が要求されました');
+    setIsStoppedByUser(true);
+    
+    // EventSourceを閉じる
+    if (currentEventSource) {
+      console.log('EventSourceを閉じています...');
+      currentEventSource.close();
+      setCurrentEventSource(null);
+    }
+    
+    // 停止時の状態を表示
+    const processType = progressMessage.includes('削除') ? '削除' : '登録';
+    const stoppedMessage = `⏹️ ${processType}処理を停止しました`;
+    
+    setProgressMessage(stoppedMessage);
+    
+    // 停止時の詳細情報を保持
+    setCurrentProcessing(prev => ({
+      ...prev,
+      summary: `${processType}処理が中断されました - ${prev.current}/${prev.total}件完了`
+    }));
+    
+    setTimeout(() => {
+      const completedCount = currentProcessing.current;
+      const totalCount = currentProcessing.total;
+      const processTypeJa = processType === '削除' ? '削除' : '登録';
+      
+      alert(`${processTypeJa}処理を停止しました。\n完了: ${completedCount}件/${totalCount}件\n\n残り${totalCount - completedCount}件は未処理です。`);
+      
+      // 状態をリセット
+      setProgress(0);
+      setProgressMessage('');
+      setCurrentProcessing({
+        current: 0,
+        total: 0,
+        currentDate: '',
+        summary: '',
+        batchInfo: ''
+      });
+      setIsLoading(false);
+      setIsStoppedByUser(false);
+      setCurrentEventSource(null); // EventSource参照もクリア
+    }, 2000);
+  };
+
 
   const addSpecialDate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,6 +96,8 @@ export default function AnniversaryForm() {
     setIsLoading(true);
     setProgress(0);
     setProgressMessage('記念日の登録を開始しています...');
+    setIsStoppedByUser(false); // 停止状態をリセット
+    setCurrentEventSource(null); // EventSource参照をリセット
     setCurrentProcessing({
       current: 0,
       total: 0,
@@ -99,6 +150,8 @@ export default function AnniversaryForm() {
       });
       
       const eventSource = new EventSource(`/api/anniversary?${params.toString()}`);
+      setCurrentEventSource(eventSource); // EventSource参照を保存
+      setIsStoppedByUser(false); // 停止状態をリセット
       // let timeoutId: NodeJS.Timeout | null = null; // タイムアウト無制限のためコメントアウト
       let lastMessageTime = Date.now();
       let hasReceivedData = false;
@@ -133,6 +186,14 @@ export default function AnniversaryForm() {
       
       eventSource.onmessage = (event) => {
         try {
+          // ユーザーによる停止チェック
+          if (isStoppedByUser) {
+            console.log('ユーザーによる停止が検出されました - 登録処理を中断');
+            eventSource.close();
+            setCurrentEventSource(null);
+            return;
+          }
+          
           console.log('SSE message received:', event.data);
           const data = JSON.parse(event.data);
           lastMessageTime = Date.now();
@@ -175,6 +236,7 @@ export default function AnniversaryForm() {
             setEndDate('');
             setDescription('');
             eventSource.close();
+            setCurrentEventSource(null); // EventSource参照をクリア
             
             setTimeout(() => {
               setProgress(0);
@@ -191,6 +253,7 @@ export default function AnniversaryForm() {
           } else if (data.type === 'error') {
             // if (timeoutId) clearTimeout(timeoutId); // タイムアウト無制限のためコメントアウト
             eventSource.close();
+            setCurrentEventSource(null); // EventSource参照をクリア
             
             if (data.error === 'auth_expired') {
               // 認証エラーの場合
@@ -218,6 +281,7 @@ export default function AnniversaryForm() {
           console.error('SSE parse error, switching to fallback:', parseError);
           // if (timeoutId) clearTimeout(timeoutId); // タイムアウト無制限のためコメントアウト
           eventSource.close();
+          setCurrentEventSource(null); // EventSource参照をクリア
           performFallbackRegistration(titleToSend, intervalType, estimatedCount);
         }
       };
@@ -228,6 +292,7 @@ export default function AnniversaryForm() {
         console.log('Time since last message:', Date.now() - lastMessageTime, 'ms');
         // if (timeoutId) clearTimeout(timeoutId); // タイムアウト無制限のためコメントアウト
         eventSource.close();
+        setCurrentEventSource(null); // EventSource参照をクリア
         
         if (hasReceivedData) {
           console.log('Had received some data via SSE, continuing with fallback');
@@ -246,6 +311,12 @@ export default function AnniversaryForm() {
   // フォールバック用の通常登録処理（進捗バー付き）
   const performFallbackRegistration = async (titleToSend: string, intervalType: string, estimatedCount: number) => {
     try {
+      // 停止チェック
+      if (isStoppedByUser) {
+        console.log('フォールバック登録処理: ユーザーによる停止が検出されました');
+        return;
+      }
+      
       setProgressMessage('通常の登録方式に切り替えました...');
       
       const response = await fetch("/api/anniversary", {
@@ -328,6 +399,8 @@ export default function AnniversaryForm() {
     setIsLoading(true);
     setProgress(0);
     setProgressMessage('削除処理を開始しています...');
+    setIsStoppedByUser(false); // 停止状態をリセット
+    setCurrentEventSource(null); // EventSource参照をリセット
     setCurrentProcessing({
       current: 0,
       total: 0,
@@ -358,6 +431,8 @@ export default function AnniversaryForm() {
       console.log('SSE削除URL:', sseUrl);
       
       const eventSource = new EventSource(sseUrl);
+      setCurrentEventSource(eventSource); // EventSource参照を保存
+      setIsStoppedByUser(false); // 停止状態をリセット
       console.log('EventSource作成完了');
       
       // 削除処理用タイムアウトを無制限に設定（コメントアウト）
@@ -374,6 +449,14 @@ export default function AnniversaryForm() {
       
       eventSource.onmessage = (event) => {
         try {
+          // ユーザーによる停止チェック
+          if (isStoppedByUser) {
+            console.log('ユーザーによる停止が検出されました - 削除処理を中断');
+            eventSource.close();
+            setCurrentEventSource(null);
+            return;
+          }
+          
           console.log('📨 削除SSEメッセージ受信:', event.data);
           const data = JSON.parse(event.data);
           
@@ -427,6 +510,7 @@ export default function AnniversaryForm() {
             
             // EventSourceを閉じる
             eventSource.close();
+            setCurrentEventSource(null); // EventSource参照をクリア
             
             setTimeout(() => {
               setProgress(0);
@@ -446,6 +530,7 @@ export default function AnniversaryForm() {
             console.log('❌ 削除エラーメッセージ受信:', data);
             // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
             eventSource.close();
+            setCurrentEventSource(null); // EventSource参照をクリア
             
             if (data.error === 'auth_expired') {
               // 認証エラーの場合
@@ -475,6 +560,7 @@ export default function AnniversaryForm() {
           console.error('❌ SSE parse error, switching to fallback:', parseError);
           // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
           eventSource.close();
+          setCurrentEventSource(null); // EventSource参照をクリア
           performFallbackDelete();
         }
       };
@@ -485,6 +571,7 @@ export default function AnniversaryForm() {
         console.log('即座にフォールバックに切り替えます');
         // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
         eventSource.close();
+        setCurrentEventSource(null); // EventSource参照をクリア
         performFallbackDelete();
       };
       
@@ -497,6 +584,12 @@ export default function AnniversaryForm() {
   // フォールバック用の通常削除処理（詳細進捗バー付き）
   const performFallbackDelete = async () => {
     try {
+      // 停止チェック
+      if (isStoppedByUser) {
+        console.log('フォールバック削除処理: ユーザーによる停止が検出されました');
+        return;
+      }
+      
       console.log('フォールバック削除処理を開始');
       setIsLoading(true);
       setProgress(10);
@@ -547,6 +640,12 @@ export default function AnniversaryForm() {
           const batches = Math.ceil(deletedCount / BATCH_SIZE);
           
           for (let batch = 1; batch <= batches; batch++) {
+            // 停止チェック
+            if (isStoppedByUser) {
+              console.log('フォールバック削除: バッチ処理中にユーザーによる停止が検出されました');
+              break;
+            }
+            
             const currentBatchSize = Math.min(BATCH_SIZE, deletedCount - (batch - 1) * BATCH_SIZE);
             const processedSoFar = (batch - 1) * BATCH_SIZE + currentBatchSize;
             const remaining = deletedCount - processedSoFar;
@@ -656,6 +755,16 @@ export default function AnniversaryForm() {
               <div className={`text-lg font-semibold ${progressMessage.includes('削除') ? 'text-red-600' : 'text-blue-600'}`}>
                 {progress}%完了
               </div>
+              
+              {/* 停止ボタン */}
+              {!isStoppedByUser && progress > 0 && progress < 100 && (
+                <button
+                  onClick={handleStopProcessing}
+                  className="bg-gray-500 hover:bg-gray-600 text-white py-2 px-6 rounded-lg text-sm font-bold transition-all duration-300 flex items-center gap-2"
+                >
+                  ⏹️ 停止
+                </button>
+              )}
               
               {/* 進捗バー */}
               <div className="space-y-2">
@@ -844,6 +953,23 @@ export default function AnniversaryForm() {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+              
+              {/* 停止時の詳細情報表示 */}
+              {isStoppedByUser && (
+                <div className="p-4 rounded-lg border-2 bg-gray-50 border-gray-300 text-center">
+                  <div className="text-2xl mb-2">⏹️</div>
+                  <div className="text-lg font-bold mb-1 text-gray-700">
+                    処理を停止しました
+                  </div>
+                  {currentProcessing.total > 0 && (
+                    <div className="text-sm text-gray-600">
+                      完了: {currentProcessing.current}件 / 全{currentProcessing.total}件
+                      <br />
+                      未処理: {currentProcessing.total - currentProcessing.current}件
+                    </div>
+                  )}
                 </div>
               )}
               
