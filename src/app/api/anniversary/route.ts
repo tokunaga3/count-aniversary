@@ -26,49 +26,64 @@ export async function POST(req: NextRequest) {
     let eventTitle;
     let iteration = 1;
     
+    // タイトルに{{years}}のみが含まれているかチェック
+    const isYearsOnly = title && title.includes('{{years}}') && 
+                       !title.includes('{{months}}') && 
+                       !title.includes('{{ym}}') && 
+                       !title.includes('{{count}}');
+    
     // プレースホルダー置換関数
-    const replacePlaceholders = (template: string, iteration: number) => {
-      // 月単位の場合
-      const years = Math.floor(iteration / 12);
-      const months = iteration % 12;
-      
-      // ymString の生成
-      let ymString;
-      if (iteration <= 11) {
-        // 11ヶ月以下の場合は「Xヶ月」
-        ymString = `${iteration}ヶ月`;
+    const replacePlaceholders = (template: string, iteration: number, isYearly = false) => {
+      if (isYearly) {
+        // 年単位の場合
+        return template
+          .replace(/\{\{count\}\}/g, iteration.toString())
+          .replace(/\{\{years\}\}/g, iteration.toString())
+          .replace(/\{\{months\}\}/g, '0')
+          .replace(/\{\{ym\}\}/g, `${iteration}年`);
       } else {
-        // 12ヶ月以上の場合は「X年Yヶ月」
-        if (months === 0) {
-          ymString = `${years}年0ヶ月`;
+        // 月単位の場合（従来通り）
+        const years = Math.floor(iteration / 12);
+        const months = iteration % 12;
+        
+        // ymString の生成
+        let ymString;
+        if (iteration <= 11) {
+          // 11ヶ月以下の場合は「Xヶ月」
+          ymString = `${iteration}ヶ月`;
         } else {
-          ymString = `${years}年${months}ヶ月`;
+          // 12ヶ月以上の場合は「X年Yヶ月」
+          if (months === 0) {
+            ymString = `${years}年0ヶ月`;
+          } else {
+            ymString = `${years}年${months}ヶ月`;
+          }
         }
+        
+        console.log(`Iteration ${iteration}: years=${years}, months=${months}, ymString=${ymString}`);
+        
+        // years と months の値を決定
+        let yearsValue, monthsValue;
+        if (iteration <= 11) {
+          // 11ヶ月以下の場合
+          yearsValue = '0';  // 0年
+          monthsValue = iteration.toString();  // 実際の月数
+        } else {
+          // 12ヶ月以上の場合
+          yearsValue = years.toString();
+          monthsValue = months.toString();
+        }
+        
+        return template
+          .replace(/\{\{count\}\}/g, iteration.toString())
+          .replace(/\{\{years\}\}/g, yearsValue)
+          .replace(/\{\{months\}\}/g, monthsValue)
+          .replace(/\{\{ym\}\}/g, ymString);
       }
-      
-      console.log(`Iteration ${iteration}: years=${years}, months=${months}, ymString=${ymString}`);
-      
-      // years と months の値を決定
-      let yearsValue, monthsValue;
-      if (iteration <= 11) {
-        // 11ヶ月以下の場合
-        yearsValue = '0';  // 0年
-        monthsValue = iteration.toString();  // 実際の月数
-      } else {
-        // 12ヶ月以上の場合
-        yearsValue = years.toString();
-        monthsValue = months.toString();
-      }
-      
-      return template
-        .replace(/\{\{count\}\}/g, iteration.toString())
-        .replace(/\{\{years\}\}/g, yearsValue)
-        .replace(/\{\{months\}\}/g, monthsValue)
-        .replace(/\{\{ym\}\}/g, ymString);
     };
     
     
-    // 終了日付に達するまで月単位でループ
+    // 終了日付に達するまでループ（年単位または月単位）
     while (currentDate <= endDateTime) {
       console.log('Generating title for iteration:', iteration);
       console.log('Current title template:', title);
@@ -76,16 +91,20 @@ export async function POST(req: NextRequest) {
       console.log('End date:', endDateTime.toISOString());
       
       if (title === null || title === undefined || title.trim() === '') {
-        // タイトルが指定されていない場合のデフォルト（月単位）
-        const years = Math.floor((iteration - 1) / 12);
-        const months = ((iteration - 1) % 12) + 1;
-        eventTitle = years === 0 
-          ? `🎉 ${months}ヶ月目の記念日 🎉`
-          : `🎉 ${years}年${months}ヶ月目の記念日 🎉`;
+        // タイトルが指定されていない場合のデフォルト
+        if (isYearsOnly) {
+          eventTitle = `🎉 ${iteration}年目の記念日 🎉`;
+        } else {
+          const years = Math.floor((iteration - 1) / 12);
+          const months = ((iteration - 1) % 12) + 1;
+          eventTitle = years === 0 
+            ? `🎉 ${months}ヶ月目の記念日 🎉`
+            : `🎉 ${years}年${months}ヶ月目の記念日 🎉`;
+        }
       } else {
         // 新しいプレースホルダーシステムを使用
         if (title.includes('{{') && title.includes('}}')) {
-          eventTitle = replacePlaceholders(title, iteration);
+          eventTitle = replacePlaceholders(title, iteration, isYearsOnly);
         } else {
           // 従来の#置換システム（後方互換性のため残す）
           const years = Math.floor((iteration - 1) / 12);
@@ -126,29 +145,35 @@ export async function POST(req: NextRequest) {
         requestBody: event,
       });
 
-      // 月単位で日付を進める（より確実な方法）
-      const currentYear = currentDate.getFullYear();
-      const currentMonth = currentDate.getMonth();
-      const currentDay = currentDate.getDate();
-      
-      // 次の月の同じ日を計算
-      let nextMonth = currentMonth + 1;
-      let nextYear = currentYear;
-      
-      if (nextMonth > 11) {
-        nextMonth = 0;
-        nextYear = currentYear + 1;
-      }
-      
-      // 次の日付を設定
-      currentDate.setFullYear(nextYear);
-      currentDate.setMonth(nextMonth);
-      currentDate.setDate(currentDay);
-      
-      // 日付が存在しない場合（例：1/31の次の月が2/31になってしまう場合）の調整
-      if (currentDate.getMonth() !== nextMonth) {
-        // 月末日に調整
-        currentDate.setDate(0);
+      // 日付を進める
+      if (isYearsOnly) {
+        // 年単位の場合：1年進める
+        currentDate.setFullYear(currentDate.getFullYear() + 1);
+      } else {
+        // 月単位で日付を進める（より確実な方法）
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth();
+        const currentDay = currentDate.getDate();
+        
+        // 次の月の同じ日を計算
+        let nextMonth = currentMonth + 1;
+        let nextYear = currentYear;
+        
+        if (nextMonth > 11) {
+          nextMonth = 0;
+          nextYear = currentYear + 1;
+        }
+        
+        // 次の日付を設定
+        currentDate.setFullYear(nextYear);
+        currentDate.setMonth(nextMonth);
+        currentDate.setDate(currentDay);
+        
+        // 日付が存在しない場合（例：1/31の次の月が2/31になってしまう場合）の調整
+        if (currentDate.getMonth() !== nextMonth) {
+          // 月末日に調整
+          currentDate.setDate(0);
+        }
       }
       
       iteration++;
@@ -236,42 +261,72 @@ export async function GET(req: NextRequest) {
             const endDateTime = new Date(new Date(end).getTime() - 9 * 60 * 60 * 1000);
             let iteration = 1;
             
+            // タイトルに{{years}}のみが含まれているかチェック
+            const isYearsOnly = title && title.includes('{{years}}') && 
+                               !title.includes('{{months}}') && 
+                               !title.includes('{{ym}}') && 
+                               !title.includes('{{count}}');
+            
             // 総数を計算
             const startDateTime = new Date(startDate);
             const endDateTimeCalc = new Date(endDate);
-            const totalCount = (endDateTimeCalc.getFullYear() - startDateTime.getFullYear()) * 12 + 
-                             (endDateTimeCalc.getMonth() - startDateTime.getMonth()) + 1;
+            let totalCount;
             
-            console.log(`Total events to create: ${totalCount}`);          // プレースホルダー置換関数
-          const replacePlaceholders = (template: string, iteration: number) => {
-            const years = Math.floor(iteration / 12);
-            const months = iteration % 12;
-            
-            let ymString;
-            if (iteration <= 11) {
-              ymString = `${iteration}ヶ月`;
+            if (isYearsOnly) {
+              // 年単位の場合
+              totalCount = endDateTimeCalc.getFullYear() - startDateTime.getFullYear() + 1;
             } else {
-              if (months === 0) {
-                ymString = `${years}年0ヶ月`;
-              } else {
-                ymString = `${years}年${months}ヶ月`;
-              }
+              // 月単位の場合
+              totalCount = (endDateTimeCalc.getFullYear() - startDateTime.getFullYear()) * 12 + 
+                          (endDateTimeCalc.getMonth() - startDateTime.getMonth()) + 1;
             }
             
-            return template
-              .replace(/\{\{count\}\}/g, iteration.toString())
-              .replace(/\{\{years\}\}/g, years.toString())
-              .replace(/\{\{months\}\}/g, months.toString())
-              .replace(/\{\{ym\}\}/g, ymString);
-          };
+            console.log(`Total events to create: ${totalCount} (${isYearsOnly ? 'yearly' : 'monthly'})`);
+            
+            // プレースホルダー置換関数
+            const replacePlaceholders = (template: string, iteration: number, isYearly = false) => {
+              if (isYearly) {
+                // 年単位の場合
+                return template
+                  .replace(/\{\{count\}\}/g, iteration.toString())
+                  .replace(/\{\{years\}\}/g, iteration.toString())
+                  .replace(/\{\{months\}\}/g, '0')
+                  .replace(/\{\{ym\}\}/g, `${iteration}年`);
+              } else {
+                // 月単位の場合（従来通り）
+                const years = Math.floor(iteration / 12);
+                const months = iteration % 12;
+                
+                let ymString;
+                if (iteration <= 11) {
+                  ymString = `${iteration}ヶ月`;
+                } else {
+                  if (months === 0) {
+                    ymString = `${years}年0ヶ月`;
+                  } else {
+                    ymString = `${years}年${months}ヶ月`;
+                  }
+                }
+                
+                return template
+                  .replace(/\{\{count\}\}/g, iteration.toString())
+                  .replace(/\{\{years\}\}/g, years.toString())
+                  .replace(/\{\{months\}\}/g, months.toString())
+                  .replace(/\{\{ym\}\}/g, ymString);
+              }
+            };
           
           while (currentDate <= endDateTime) {
             try {
               let eventTitle;
               if (title && title.trim() !== '') {
-                eventTitle = replacePlaceholders(title, iteration);
+                eventTitle = replacePlaceholders(title, iteration, !!isYearsOnly);
               } else {
-                eventTitle = `🎉 ${iteration}回目の記念日 🎉`;
+                if (isYearsOnly) {
+                  eventTitle = `🎉 ${iteration}年目の記念日 🎉`;
+                } else {
+                  eventTitle = `🎉 ${iteration}回目の記念日 🎉`;
+                }
               }
               
               const eventStartTime = currentDate.toISOString();
@@ -382,7 +437,14 @@ export async function GET(req: NextRequest) {
               
               console.log(`Progress sent successfully for event ${createdCount}`);
               
-              currentDate.setMonth(currentDate.getMonth() + 1);
+              // 日付を進める
+              if (isYearsOnly) {
+                // 年単位の場合：1年進める
+                currentDate.setFullYear(currentDate.getFullYear() + 1);
+              } else {
+                // 月単位の場合：1ヶ月進める
+                currentDate.setMonth(currentDate.getMonth() + 1);
+              }
               iteration++;
               
               // レート制限対策
@@ -391,7 +453,11 @@ export async function GET(req: NextRequest) {
             } catch (eventError) {
               console.error(`Error creating event ${iteration}:`, eventError);
               // エラーが発生してもスキップして続行
-              currentDate.setMonth(currentDate.getMonth() + 1);
+              if (isYearsOnly) {
+                currentDate.setFullYear(currentDate.getFullYear() + 1);
+              } else {
+                currentDate.setMonth(currentDate.getMonth() + 1);
+              }
               iteration++;
             }
           }
