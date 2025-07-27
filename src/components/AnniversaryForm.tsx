@@ -26,6 +26,18 @@ export default function AnniversaryForm() {
   const [deleteCalendarId, setDeleteCalendarId] = useState<string>('');
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState<boolean>(false);
   const [isDeleteMode, setIsDeleteMode] = useState<boolean>(false);
+  const [currentProcessing, setCurrentProcessing] = useState<{
+    current: number;
+    total: number;
+    currentDate: string;
+    summary: string;
+  }>({
+    current: 0,
+    total: 0,
+    currentDate: '',
+    summary: ''
+  });
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
 
   const addSpecialDate = async (e: React.FormEvent) => {
@@ -58,19 +70,59 @@ export default function AnniversaryForm() {
       // 進捗シミュレーション（より詳細に）
       setProgressMessage(`約${monthsDiff}件の記念日を登録準備中...`);
       setProgress(10);
+      setCurrentProcessing({
+        current: 0,
+        total: monthsDiff,
+        currentDate: date,
+        summary: '登録準備中...'
+      });
 
       // 段階的進捗更新
       const progressSteps = [
-        { delay: 300, progress: 20, message: 'カレンダー接続中...' },
-        { delay: 600, progress: 35, message: `${monthsDiff}件の記念日を処理中...` },
-        { delay: 1200, progress: 55, message: '記念日データを生成中...' },
-        { delay: 1800, progress: 75, message: 'カレンダーに登録中...' }
+        { 
+          delay: 300, 
+          progress: 20, 
+          message: 'カレンダー接続中...', 
+          current: 0,
+          currentDate: date,
+          summary: 'カレンダー接続準備中'
+        },
+        { 
+          delay: 600, 
+          progress: 35, 
+          message: `${monthsDiff}件の記念日を処理中...`, 
+          current: Math.floor(monthsDiff * 0.1),
+          currentDate: date,
+          summary: titleToSend
+        },
+        { 
+          delay: 1200, 
+          progress: 55, 
+          message: '記念日データを生成中...', 
+          current: Math.floor(monthsDiff * 0.4),
+          currentDate: date,
+          summary: titleToSend
+        },
+        { 
+          delay: 1800, 
+          progress: 75, 
+          message: 'カレンダーに登録中...', 
+          current: Math.floor(monthsDiff * 0.7),
+          currentDate: date,
+          summary: titleToSend
+        }
       ];
 
       progressSteps.forEach(step => {
         setTimeout(() => {
           setProgress(step.progress);
           setProgressMessage(step.message);
+          setCurrentProcessing({
+            current: step.current,
+            total: monthsDiff,
+            currentDate: step.currentDate,
+            summary: step.summary
+          });
         }, step.delay);
       });
       
@@ -89,10 +141,22 @@ export default function AnniversaryForm() {
 
       setProgress(90);
       setProgressMessage('最終処理中...');
+      setCurrentProcessing({
+        current: monthsDiff,
+        total: monthsDiff,
+        currentDate: endDate,
+        summary: '登録完了処理中'
+      });
 
       if (response.ok) {
         setProgress(100);
         setProgressMessage('🎉 登録完了！');
+        setCurrentProcessing({
+          current: monthsDiff,
+          total: monthsDiff,
+          currentDate: endDate,
+          summary: '全ての記念日が登録されました'
+        });
         
         const newDate: SpecialDate = {
           id: crypto.randomUUID(),
@@ -114,6 +178,12 @@ export default function AnniversaryForm() {
         setTimeout(() => {
           setProgress(0);
           setProgressMessage('');
+          setCurrentProcessing({
+            current: 0,
+            total: 0,
+            currentDate: '',
+            summary: ''
+          });
           setIsLoading(false);
           alert(`${monthsDiff}件の記念日を登録しました！`);
         }, 2000);
@@ -134,8 +204,15 @@ export default function AnniversaryForm() {
   const handleDeleteByCalendarId = async () => {
     if (!deleteCalendarId) return;
     setIsLoading(true);
+    setIsDeleting(true);
     setProgress(0);
     setProgressMessage('削除処理を開始しています...');
+    setCurrentProcessing({
+      current: 0,
+      total: 0,
+      currentDate: '',
+      summary: '削除準備中...'
+    });
     
     // 開発環境用にSSEを試行し、即座にフォールバックするオプション
     const useSSE = process.env.NODE_ENV === 'production'; // 本番環境でのみSSEを使用
@@ -222,19 +299,55 @@ export default function AnniversaryForm() {
       setIsLoading(true);
       setProgress(10);
       setProgressMessage('削除対象の予定を検索中...');
+      setCurrentProcessing({
+        current: 0,
+        total: 0,
+        currentDate: '',
+        summary: '削除対象を検索中'
+      });
       
       // 段階的な進捗シミュレーション
       const deleteSteps = [
-        { delay: 200, progress: 20, message: 'カレンダーに接続中...' },
-        { delay: 500, progress: 40, message: '削除対象を特定中...' },
-        { delay: 800, progress: 60, message: '予定を削除中...' },
-        { delay: 1200, progress: 80, message: '削除処理を完了中...' }
+        { 
+          delay: 200, 
+          progress: 20, 
+          message: 'カレンダーに接続中...',
+          current: 0,
+          summary: 'カレンダー接続中'
+        },
+        { 
+          delay: 500, 
+          progress: 40, 
+          message: '削除対象を特定中...',
+          current: 0,
+          summary: '記念日を検索中'
+        },
+        { 
+          delay: 800, 
+          progress: 60, 
+          message: '予定を削除中...',
+          current: 0,
+          summary: '記念日を削除中'
+        },
+        { 
+          delay: 1200, 
+          progress: 80, 
+          message: '削除処理を完了中...',
+          current: 0,
+          summary: '削除処理完了中'
+        }
       ];
 
       deleteSteps.forEach(step => {
         setTimeout(() => {
           setProgress(step.progress);
           setProgressMessage(step.message);
+          setCurrentProcessing({
+            current: step.current,
+            total: 0,
+            currentDate: '',
+            summary: step.summary
+          });
         }, step.delay);
       });
       
@@ -246,6 +359,12 @@ export default function AnniversaryForm() {
         const result = await response.json();
         setProgress(100);
         setProgressMessage('🗑️ 削除完了！');
+        setCurrentProcessing({
+          current: result.deletedCount || 0,
+          total: result.deletedCount || 0,
+          currentDate: '',
+          summary: '全ての記念日が削除されました'
+        });
         
         setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
         setDeleteCalendarId('');
@@ -254,21 +373,42 @@ export default function AnniversaryForm() {
         setTimeout(() => {
           setProgress(0);
           setProgressMessage('');
+          setCurrentProcessing({
+            current: 0,
+            total: 0,
+            currentDate: '',
+            summary: ''
+          });
           setIsLoading(false);
+          setIsDeleting(false);
           alert(`${result.deletedCount || 0}件の予定を削除しました！`);
         }, 2000);
       } else {
         const errorData = await response.json();
         setProgress(0);
         setProgressMessage('');
+        setCurrentProcessing({
+          current: 0,
+          total: 0,
+          currentDate: '',
+          summary: ''
+        });
         setIsLoading(false);
+        setIsDeleting(false);
         alert(errorData.error || "削除処理でエラーが発生しました");
       }
     } catch (fallbackError) {
       console.error('Fallback delete failed:', fallbackError);
       setProgress(0);
       setProgressMessage('');
+      setCurrentProcessing({
+        current: 0,
+        total: 0,
+        currentDate: '',
+        summary: ''
+      });
       setIsLoading(false);
+      setIsDeleting(false);
       alert("削除処理でエラーが発生しました");
     }
   };
@@ -342,6 +482,43 @@ export default function AnniversaryForm() {
                   )}
                 </div>
               </div>
+              
+              {/* 詳細進捗情報表示 */}
+              {(currentProcessing.total > 0 || currentProcessing.summary) && (
+                <div className="mt-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                  <div className="space-y-2">
+                    {/* 処理数表示 */}
+                    {currentProcessing.total > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-600">進捗:</span>
+                        <span className="text-lg font-bold text-blue-600">
+                          {currentProcessing.current} / {currentProcessing.total}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* 現在の処理対象 */}
+                    {currentProcessing.summary && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-600">状況:</span>
+                        <span className="text-sm text-gray-800 font-medium">
+                          {currentProcessing.summary}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* 現在の日付 */}
+                    {currentProcessing.currentDate && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-600">現在の日付:</span>
+                        <span className="text-sm text-gray-800 font-mono">
+                          {currentProcessing.currentDate}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               
               {/* 完了時のアニメーション */}
               {progress === 100 && (
