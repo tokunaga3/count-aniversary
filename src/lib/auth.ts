@@ -28,15 +28,6 @@ export const authOptions: NextAuthOptions = {
       }),
     ],
     callbacks: {
-      async signIn({ profile }) {
-        if (profile?.email) {
-          const allowedEmails = process.env.ALLOWED_GOOGLE_EMAILS?.split(",") || [];
-          if (allowedEmails.includes(profile.email)) {
-            return true; // 許可されたユーザーのみログイン可
-          }
-        }
-        return false; // その他のユーザーは拒否
-      },
       async session({ session, token }) {
         session.accessToken = token.accessToken as string;
         return session;
