@@ -20,7 +20,7 @@ export const authOptions: NextAuthOptions = {
           params: {
             scope:
               "https://www.googleapis.com/auth/calendar openid email profile",
-            prompt: "consent",
+            prompt: "select_account", // consentからselect_accountに変更して警告を軽減
             access_type: "offline",
             response_type: "code",
           },
