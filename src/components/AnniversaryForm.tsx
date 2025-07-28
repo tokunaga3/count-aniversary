@@ -1003,14 +1003,25 @@ export default function AnniversaryForm() {
       
       <div className="container mx-auto p-6">
           <div className="flex justify-between items-center mb-8">
+            <div></div> {/* 左側を空にする */}
             <div className="flex gap-4">
-              <button
-                onClick={() => setIsDeleteMode(true)}
-                className="bg-red-500 text-white py-2 px-4 rounded-lg text-sm font-bold hover:bg-red-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                予定を削除
-              </button>
+              {isDeleteMode ? (
+                <button
+                  onClick={() => setIsDeleteMode(false)}
+                  className="bg-blue-500 text-white py-2 px-4 rounded-lg text-sm font-bold hover:bg-blue-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2"
+                >
+                  <Calendar className="w-4 h-4" />
+                  カレンダー登録
+                </button>
+              ) : (
+                <button
+                  onClick={() => setIsDeleteMode(true)}
+                  className="bg-red-500 text-white py-2 px-4 rounded-lg text-sm font-bold hover:bg-red-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  予定を削除
+                </button>
+              )}
             </div>
           </div>
 
@@ -1073,7 +1084,7 @@ export default function AnniversaryForm() {
 
                 <div>
                   <label className="text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
-                    タイトル ✨
+                    記念日名 ✨
                     <div className="group relative">
                       <Info className="w-5 h-5 text-gray-400 cursor-help" />
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-80 p-3 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
@@ -1106,7 +1117,7 @@ export default function AnniversaryForm() {
 
                 <div>
                   <label className="block text-lg font-medium text-blue-600 mb-2">
-                    日付 
+                    記念日 
                   </label>
                   <input
                     type="date"
@@ -1119,7 +1130,7 @@ export default function AnniversaryForm() {
 
                 <div>
                   <label className="text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
-                    終了日 �
+                    終了日
                     <div className="group relative">
                       <Info className="w-5 h-5 text-gray-400 cursor-help" />
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
