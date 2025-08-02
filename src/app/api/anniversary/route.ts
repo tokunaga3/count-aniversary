@@ -760,6 +760,7 @@ export async function GET(request: NextRequest) {
     // 削除対象のイベント一覧を取得
     if (action === "list") {
       const calendarId = searchParams.get("calendarId");
+      const noFilter = searchParams.get("noFilter") === "true"; // フィルタリングなしオプション
       
       if (!calendarId) {
         return NextResponse.json({ error: "カレンダーIDが必要です" }, { status: 400 });
@@ -770,32 +771,63 @@ export async function GET(request: NextRequest) {
       const calendar = google.calendar({ version: "v3", auth });
 
       try {
-        // 記念日イベントを検索
+        // すべてのイベントを取得（検索クエリなし）
         const eventsResponse = await calendar.events.list({
           calendarId,
-          q: "記念日",
           maxResults: 2500,
           singleEvents: true,
           orderBy: "startTime",
         });
 
         const events = eventsResponse.data.items || [];
-        const anniversaryEvents = events.filter(event => 
-          event.summary?.includes("記念日") || 
-          event.summary?.includes("anniversary")
-        );
+        
+        // デバッグ: 全てのイベントを一時的にログ出力
+        console.log(`カレンダー ${calendarId} の全イベント数:`, events.length);
+        events.forEach((event, index) => {
+          console.log(`イベント ${index + 1}:`, {
+            id: event.id,
+            summary: event.summary,
+            start: event.start,
+            description: event.description
+          });
+        });
+        
+        // フィルタリングを緩和 - より多くのパターンをキャッチ
+        const anniversaryEvents = events.filter(event => {
+          const summary = event.summary?.toLowerCase() || '';
+          return summary.includes("記念日") || 
+                 summary.includes("anniversary") ||
+                 summary.includes("記念") ||
+                 summary.includes("周年") ||
+                 summary.includes("年目") ||
+                 summary.includes("ヶ月") ||
+                 summary.includes("回目") ||
+                 summary.includes("🎉") ||
+                 summary.includes("💍") ||
+                 summary.includes("❤️");
+        });
+        
+        console.log(`フィルタ後の記念日イベント数:`, anniversaryEvents.length);
+
+        // フィルタリングオプションに応じて結果を決定
+        const resultEvents = noFilter ? events : anniversaryEvents;
 
         // イベント一覧を返す
         return NextResponse.json({
           success: true,
-          events: anniversaryEvents.map(event => ({
+          events: resultEvents.map(event => ({
             id: event.id,
             summary: event.summary,
             start: event.start,
             end: event.end,
             calendarId: calendarId
           })),
-          totalCount: anniversaryEvents.length
+          totalCount: resultEvents.length,
+          debug: {
+            totalEventsInCalendar: events.length,
+            filteredEvents: anniversaryEvents.length,
+            noFilterApplied: noFilter
+          }
         });
 
       } catch (error: unknown) {
