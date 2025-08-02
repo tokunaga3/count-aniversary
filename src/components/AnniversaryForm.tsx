@@ -555,7 +555,8 @@ export default function AnniversaryForm() {
           current: 0,
           total: 0,
           currentDate: '',
-          summary: ''
+          summary: '',
+          batchInfo: ''
         });
         setIsLoading(false);
         setCurrentAbortController(null); // AbortController をクリア
@@ -600,8 +601,7 @@ export default function AnniversaryForm() {
       current: 0,
       total: 0,
       currentDate: '',
-      summary: '削除準備中...',
-      batchInfo: ''
+      summary: '削除準備中...'
     });
     
     // 削除処理は単発APIのレスポンスのみ使用
@@ -744,9 +744,8 @@ export default function AnniversaryForm() {
           current: deletedCount,
           total: totalCount,
           currentDate: new Date().toLocaleDateString('ja-JP'),
-          summary: `並列削除処理中 - バッチ ${batchNumber}/${totalBatches}`,
-          remaining: totalCount - deletedCount - failedCount,
-          batchInfo: `バッチ ${batchNumber}/${totalBatches}`
+          summary: `並列削除処理中 (${batch.length}件同時実行)`,
+          remaining: totalCount - deletedCount - failedCount
         });
         
         // 並列削除処理
@@ -864,15 +863,14 @@ export default function AnniversaryForm() {
         const remaining = totalCount - processedCount;
         
         setProgress(progress);
-        setProgressMessage(`並列削除中: ${deletedCount}件完了 (残り${remaining}件) - バッチ ${batchNumber}/${totalBatches}`);
+        setProgressMessage(`並列削除中: ${deletedCount}件完了 (残り${remaining}件)`);
         
         setCurrentProcessing({
           current: deletedCount,
           total: totalCount,
           currentDate: new Date().toLocaleDateString('ja-JP'),
-          summary: `バッチ ${batchNumber}/${totalBatches} 処理完了: 成功 ${deletedCount}件, 失敗 ${failedCount}件`,
-          remaining: remaining,
-          batchInfo: `バッチ ${batchNumber}/${totalBatches} 完了`
+          summary: `削除処理完了: 成功 ${deletedCount}件, 失敗 ${failedCount}件`,
+          remaining: remaining
         });
         
         // レート制限対策の遅延処理（バッチ間）
@@ -907,8 +905,7 @@ export default function AnniversaryForm() {
         total: totalCount,
         currentDate: new Date().toLocaleDateString('ja-JP'),
         summary: `全ての削除処理が完了しました (成功: ${deletedCount}件, 失敗: ${failedCount}件)`,
-        remaining: 0,
-        batchInfo: '削除処理完了'
+        remaining: 0
       });
       
       setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
@@ -1116,29 +1113,6 @@ export default function AnniversaryForm() {
                           <span className="text-sm font-medium text-gray-600">
                             全{currentProcessing.total}件
                           </span>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* バッチ処理情報表示 */}
-                    {currentProcessing.batchInfo && (
-                      <div className={`rounded-lg p-3 border-2 ${
-                        progressMessage.includes('削除') 
-                          ? 'bg-purple-50 border-purple-200' 
-                          : 'bg-indigo-50 border-indigo-200'
-                      }`}>
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-gray-700">並列処理状況:</span>
-                          <div className="text-right">
-                            <span className={`text-lg font-bold ${
-                              progressMessage.includes('削除') ? 'text-purple-600' : 'text-indigo-600'
-                            }`}>
-                              {currentProcessing.batchInfo}
-                            </span>
-                            <div className="text-xs text-gray-500">
-                              {progressMessage.includes('削除') ? '5件ずつ並列削除中' : '並列処理中'}
-                            </div>
-                          </div>
                         </div>
                       </div>
                     )}
