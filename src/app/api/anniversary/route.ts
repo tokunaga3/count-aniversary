@@ -476,16 +476,79 @@ export async function GET(request: NextRequest) {
         });
       }
 
-      // 通常のJSON応答（削除対象リストのみ）
-      return NextResponse.json({
-        success: true,
-        events: anniversaryEvents.map(event => ({
-          id: event.id,
-          summary: event.summary,
-          start: event.start?.date || event.start?.dateTime
-        })),
-        totalCount: anniversaryEvents.length
-      });
+      // 通常のJSON応答（実際の削除処理）
+      try {
+        let deletedCount = 0;
+        const deletedEvents = [];
+        
+        console.log(`削除処理開始: ${anniversaryEvents.length}件のイベントを削除予定`);
+        
+        // 各イベントを個別に削除
+        for (const event of anniversaryEvents) {
+          if (event.id) {
+            try {
+              await calendar.events.delete({
+                calendarId: calendarId,
+                eventId: event.id,
+              });
+              
+              deletedCount++;
+              deletedEvents.push({
+                id: event.id,
+                summary: event.summary,
+                deleted: true
+              });
+              
+              console.log(`削除成功: ${event.summary} (${deletedCount}/${anniversaryEvents.length})`);
+              
+              // レート制限対策：100ms待機
+              await new Promise(resolve => setTimeout(resolve, 100));
+              
+            } catch (deleteError) {
+              console.error(`個別削除エラー: ${event.summary}`, deleteError);
+              deletedEvents.push({
+                id: event.id,
+                summary: event.summary,
+                deleted: false,
+                error: deleteError instanceof Error ? deleteError.message : 'Unknown error'
+              });
+            }
+          }
+        }
+        
+        console.log(`削除処理完了: ${deletedCount}件削除、${anniversaryEvents.length - deletedCount}件失敗`);
+        
+        return NextResponse.json({
+          success: true,
+          message: `${deletedCount}件の記念日を削除しました`,
+          deletedCount,
+          totalCount: anniversaryEvents.length,
+          failedCount: anniversaryEvents.length - deletedCount,
+          events: deletedEvents
+        });
+        
+      } catch (error) {
+        console.error('削除処理エラー:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        
+        // 認証関連のエラーをチェック
+        if (errorMessage.includes('Invalid Credentials') || 
+            errorMessage.includes('invalid_grant') ||
+            errorMessage.includes('unauthorized') ||
+            errorMessage.includes('401')) {
+          return NextResponse.json({ 
+            error: "auth_expired",
+            message: "認証が期限切れです。再度ログインしてください。" 
+          }, { status: 401 });
+        }
+        
+        return NextResponse.json({ 
+          success: false,
+          error: "deletion_failed",
+          message: "削除処理中にエラーが発生しました",
+          details: errorMessage 
+        }, { status: 500 });
+      }
     }
 
     // 単一イベント削除
@@ -694,6 +757,78 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // 削除対象のイベント一覧を取得
+    if (action === "list") {
+      const calendarId = searchParams.get("calendarId");
+      
+      if (!calendarId) {
+        return NextResponse.json({ error: "カレンダーIDが必要です" }, { status: 400 });
+      }
+
+      const auth = new google.auth.OAuth2();
+      auth.setCredentials({ access_token: session.accessToken });
+      const calendar = google.calendar({ version: "v3", auth });
+
+      try {
+        // 記念日イベントを検索
+        const eventsResponse = await calendar.events.list({
+          calendarId,
+          q: "記念日",
+          maxResults: 2500,
+          singleEvents: true,
+          orderBy: "startTime",
+        });
+
+        const events = eventsResponse.data.items || [];
+        const anniversaryEvents = events.filter(event => 
+          event.summary?.includes("記念日") || 
+          event.summary?.includes("anniversary")
+        );
+
+        // イベント一覧を返す
+        return NextResponse.json({
+          success: true,
+          events: anniversaryEvents.map(event => ({
+            id: event.id,
+            summary: event.summary,
+            start: event.start,
+            end: event.end,
+            calendarId: calendarId
+          })),
+          totalCount: anniversaryEvents.length
+        });
+
+      } catch (error: unknown) {
+        console.error("Calendar API エラー:", error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        
+        // 認証関連のエラーを詳細にチェック
+        if (errorMessage.includes('Invalid Credentials') || 
+            errorMessage.includes('invalid_grant') ||
+            errorMessage.includes('unauthorized') ||
+            errorMessage.includes('401')) {
+          return NextResponse.json({ 
+            error: "auth_expired",
+            message: "認証が期限切れです。再度ログインしてください。" 
+          }, { status: 401 });
+        }
+        
+        // カレンダーが見つからない場合
+        if (errorMessage.includes('Not Found') || errorMessage.includes('404')) {
+          return NextResponse.json({ 
+            error: "calendar_not_found",
+            message: `カレンダーID '${calendarId}' が見つかりません。` 
+          }, { status: 404 });
+        }
+        
+        return NextResponse.json({ 
+          error: "calendar_api_error",
+          message: "カレンダーAPIでエラーが発生しました",
+          details: errorMessage 
+        }, { status: 500 });
+      }
+    }
+
     return NextResponse.json({ error: "不明なアクション" }, { status: 400 });
 
   } catch (error: unknown) {
@@ -715,4 +850,90 @@ export async function OPTIONS() {
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     },
   });
+}
+
+// DELETE method for individual event deletion
+export async function DELETE(request: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+    
+    if (!session?.accessToken) {
+      return NextResponse.json({ 
+        error: 'auth_expired',
+        message: '認証が必要です' 
+      }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { action, calendarId, eventId } = body;
+
+    if (action !== 'delete-single') {
+      return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+    }
+
+    if (!calendarId || !eventId) {
+      return NextResponse.json({ 
+        error: 'missing_parameters',
+        message: 'calendarId と eventId が必要です' 
+      }, { status: 400 });
+    }
+
+    // Google Calendar API setup
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({
+      access_token: session.accessToken,
+      refresh_token: session.refreshToken,
+    });
+
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+    try {
+      // 単一のイベントを削除
+      await calendar.events.delete({
+        calendarId: calendarId,
+        eventId: eventId,
+      });
+
+      console.log(`Successfully deleted event: ${eventId}`);
+
+      return NextResponse.json({ 
+        success: true,
+        message: 'イベントが正常に削除されました',
+        eventId: eventId
+      });
+
+    } catch (deleteError: unknown) {
+      const error = deleteError as { status?: number; code?: number; message?: string };
+      console.error(`Error deleting event ${eventId}:`, error);
+      
+      // 認証エラーの場合
+      if (error.status === 401 || error.code === 401) {
+        return NextResponse.json({
+          error: 'auth_expired',
+          message: '認証が期限切れになりました。再ログインしてください。'
+        }, { status: 401 });
+      }
+
+      // カレンダーが見つからない場合
+      if (error.status === 404 || error.code === 404) {
+        return NextResponse.json({
+          error: 'event_not_found',
+          message: 'イベントが見つかりません'
+        }, { status: 404 });
+      }
+
+      return NextResponse.json({ 
+        success: false,
+        error: 'delete_failed',
+        message: `イベントの削除に失敗しました: ${error.message || 'Unknown error'}`
+      }, { status: 500 });
+    }
+
+  } catch (error) {
+    console.error('DELETE request error:', error);
+    return NextResponse.json({ 
+      error: 'server_error',
+      message: 'サーバーエラーが発生しました' 
+    }, { status: 500 });
+  }
 }

@@ -60,7 +60,7 @@ export default function AnniversaryForm() {
     // 進行中のAPIリクエストをキャンセル
     if (currentAbortController) {
       console.log('進行中のAPIリクエストをキャンセルしています...');
-      currentAbortController.abort();
+      currentAbortController.abort('ユーザーによる処理停止');
       setCurrentAbortController(null);
     }
     
@@ -404,6 +404,11 @@ export default function AnniversaryForm() {
         if (isStoppedByUser || abortController.signal.aborted) {
           console.log('単発API登録: 個別登録中にユーザーによる停止が検出されました');
           console.log(`停止時点: ${createdCount}/${totalCount}件完了`);
+          console.log('AbortController状態:', {
+            isStoppedByUser,
+            signalAborted: abortController.signal.aborted,
+            abortReason: abortController.signal.reason
+          });
           
           // 停止時の状態を更新
           setCurrentProcessing({
@@ -488,15 +493,32 @@ export default function AnniversaryForm() {
           });
           
           // レート制限対策の遅延処理（停止チェック付き）
-          for (let delay = 0; delay < 100; delay += 10) {
-            if (isStoppedByUser || abortController.signal.aborted) {
-              console.log('単発API登録: 遅延処理中にユーザーによる停止が検出されました');
-              return; // 即座に処理を終了
+          try {
+            for (let delay = 0; delay < 100; delay += 10) {
+              if (isStoppedByUser || abortController.signal.aborted) {
+                console.log('単発API登録: 遅延処理中にユーザーによる停止が検出されました');
+                return; // 即座に処理を終了
+              }
+              await new Promise(resolve => setTimeout(resolve, 10));
             }
-            await new Promise(resolve => setTimeout(resolve, 10));
+          } catch (delayError) {
+            // 遅延処理中のAbortErrorも適切に処理
+            if (delayError instanceof Error && delayError.name === 'AbortError') {
+              console.log('登録遅延処理中にAbortErrorが発生しました');
+              return;
+            }
+            console.error('登録遅延処理中に予期しないエラーが発生しました:', delayError);
           }
           
         } catch (error) {
+          // AbortErrorの場合は、ユーザーによる停止として処理を終了
+          if (error instanceof Error && error.name === 'AbortError') {
+            console.log(`登録処理中断 (ユーザー停止): ${anniversary.title} - ${error.message}`);
+            // AbortErrorの場合は即座に処理を終了
+            return;
+          }
+          
+          // その他のエラーの場合
           console.error(`イベント作成エラー: ${anniversary.title}`, error);
         }
       }
@@ -544,15 +566,21 @@ export default function AnniversaryForm() {
       console.error('単発API登録エラー:', error);
       setCurrentAbortController(null); // AbortController をクリア
       
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('APIリクエストがユーザーによってキャンセルされました');
-        setProgressMessage('⏹️ 処理がキャンセルされました');
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          console.log('APIリクエストがユーザーによってキャンセルされました:', error.message);
+          setProgressMessage('⏹️ 処理がキャンセルされました');
+        } else {
+          console.error('予期しないエラー:', error.message);
+          setProgressMessage('❌ 登録中にエラーが発生しました');
+          alert(`処理中にエラーが発生しました: ${error.message}`);
+        }
       } else {
         setProgressMessage('❌ 登録中にエラーが発生しました');
+        alert("処理中にエラーが発生しました");
       }
       setProgress(0);
       setIsLoading(false);
-      alert("処理中にエラーが発生しました");
     }
   };
 
@@ -576,314 +604,79 @@ export default function AnniversaryForm() {
       batchInfo: ''
     });
     
-    // 削除処理も単発APIを使用（SSEを使用しない）
-    const useSSE = false; // 単発APIの繰り返し処理を使用
-    
-    if (useSSE) {
-      console.log('Attempting SSE connection for delete...');
-      trySSEDelete();
-    } else {
-      console.log('Using direct API approach for delete...');
-      performFallbackDelete(abortController);
-    }
+    // 削除処理は単発APIのレスポンスのみ使用
+    console.log('Using direct API approach for delete...');
+    performDirectDelete(abortController);
   };
 
-  // SSE削除を試行する関数
-  const trySSEDelete = async () => {
-    try {
-      console.log('=== SSE削除処理開始 ===');
-      console.log('削除対象カレンダーID:', deleteCalendarId);
-      
-      const sseUrl = `/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}&streaming=true&action=delete`;
-      console.log('SSE削除URL:', sseUrl);
-      
-      const eventSource = new EventSource(sseUrl);
-      setCurrentEventSource(eventSource); // EventSource参照を保存
-      setIsStoppedByUser(false); // 停止状態をリセット
-      console.log('EventSource作成完了');
-      
-      // 削除処理用タイムアウトを無制限に設定（コメントアウト）
-      // const timeout = setTimeout(() => {
-      //   console.log('⚠️ SSE削除接続タイムアウト - フォールバックに切り替え');
-      //   eventSource.close();
-      //   performFallbackDelete();
-      // }, 30000);
-      
-      eventSource.onopen = () => {
-        console.log('✅ SSE削除接続が正常に開始されました');
-        setProgressMessage('リアルタイム削除処理に接続しました...');
-      };
-      
-      eventSource.onmessage = (event) => {
-        try {
-          // ユーザーによる停止チェック
-          if (isStoppedByUser) {
-            console.log('ユーザーによる停止が検出されました - 削除処理を中断');
-            eventSource.close();
-            setCurrentEventSource(null);
-            return;
-          }
-          
-          console.log('📨 削除SSEメッセージ受信:', event.data);
-          const data = JSON.parse(event.data);
-          
-          if (data.type === 'progress') {
-            setProgress(data.progress);
-            setProgressMessage(data.message);
-            
-            // 削除処理の詳細進捗情報を更新（残り件数とバッチ情報を含む）
-            setCurrentProcessing({
-              current: data.current || 0,
-              total: data.total || 0,
-              currentDate: data.currentDate || '',
-              summary: data.summary || data.eventTitle || '削除処理中',
-              remaining: data.remaining || 0,
-              batchInfo: data.batchInfo || '' // バッチ情報を追加
-            });
-            
-            // より詳細な進捗メッセージに更新
-            if (data.current && data.total) {
-              const percentage = Math.round((data.current / data.total) * 100);
-              const remaining = data.total - data.current;
-              setProgressMessage(`削除中: ${data.current}/${data.total}件 (${percentage}%) - 残り${remaining}件`);
-            }
-            
-            console.log('削除進捗更新:', {
-              current: data.current,
-              total: data.total,
-              summary: data.summary,
-              remaining: data.remaining,
-              currentDate: data.currentDate
-            });
-          } else if (data.type === 'complete') {
-            console.log('✅ 削除完了メッセージ受信');
-            // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
-            setProgress(100);
-            setProgressMessage('🗑️ 削除完了！');
-            
-            // 完了時の詳細情報を設定
-            setCurrentProcessing({
-              current: data.current || data.deletedCount || 0,
-              total: data.total || data.deletedCount || 0,
-              currentDate: '',
-              summary: data.summary || `${data.deletedCount || 0}件の記念日の並列削除が完了しました`,
-              remaining: 0,
-              batchInfo: '全バッチ処理完了'
-            });
-            
-            setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
-            setDeleteCalendarId('');
-            setShowDeleteConfirmation(false);
-            
-            // EventSourceを閉じる
-            eventSource.close();
-            setCurrentEventSource(null); // EventSource参照をクリア
-            
-            setTimeout(() => {
-              setProgress(0);
-              setProgressMessage('');
-              setCurrentProcessing({
-                current: 0,
-                total: 0,
-                currentDate: '',
-                summary: '',
-                remaining: 0,
-                batchInfo: ''
-              });
-              setIsLoading(false);
-              alert(`${data.deletedCount || 0}件の予定を削除しました！`);
-            }, 3000);
-          } else if (data.type === 'error') {
-            console.log('❌ 削除エラーメッセージ受信:', data);
-            // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
-            eventSource.close();
-            setCurrentEventSource(null); // EventSource参照をクリア
-            
-            if (data.error === 'auth_expired') {
-              // 認証エラーの場合
-              setProgress(0);
-              setProgressMessage('❌ 認証の期限が切れました');
-              setCurrentProcessing({
-                current: 0,
-                total: 0,
-                currentDate: '',
-                summary: '',
-                batchInfo: ''
-              });
-              setIsLoading(false);
-              setShowDeleteConfirmation(false);
-              
-              alert(`認証の期限が切れました。${data.processed || 0}件の予定が削除されました。\n再度ログインしてから残りの削除を行ってください。`);
-              
-              // ログアウトして再認証を促す
-              window.location.href = '/api/auth/signout';
-            } else {
-              // その他のエラーの場合はフォールバック（仮のAbortController使用）
-              console.error('SSE reported error, switching to fallback');
-              const fallbackAbortController = new AbortController();
-              setCurrentAbortController(fallbackAbortController);
-              performFallbackDelete(fallbackAbortController);
-            }
-          }
-        } catch (parseError) {
-          console.error('❌ SSE parse error, switching to fallback:', parseError);
-          // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
-          eventSource.close();
-          setCurrentEventSource(null); // EventSource参照をクリア
-          const fallbackAbortController = new AbortController();
-          setCurrentAbortController(fallbackAbortController);
-          performFallbackDelete(fallbackAbortController);
-        }
-      };
-      
-      eventSource.onerror = (error) => {
-        console.log('❌ SSE削除接続エラー:', error);
-        console.log('EventSource readyState:', eventSource.readyState);
-        console.log('即座にフォールバックに切り替えます');
-        // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
-        eventSource.close();
-        setCurrentEventSource(null); // EventSource参照をクリア
-        const fallbackAbortController = new AbortController();
-        setCurrentAbortController(fallbackAbortController);
-        performFallbackDelete(fallbackAbortController);
-      };
-      
-    } catch (initError) {
-      console.error('❌ SSE削除初期化失敗, フォールバックを使用:', initError);
-      const fallbackAbortController = new AbortController();
-      setCurrentAbortController(fallbackAbortController);
-      performFallbackDelete(fallbackAbortController);
-    }
-  };
-
-  // フォールバック用の通常削除処理（詳細進捗バー付き）
-  const performFallbackDelete = async (abortController: AbortController) => {
+  // フロントエンド繰り返し処理による削除（メイン処理）
+  const performDirectDelete = async (abortController: AbortController) => {
     try {
       // 停止チェック
       if (isStoppedByUser || abortController.signal.aborted) {
-        console.log('フォールバック削除処理: ユーザーによる停止が検出されました');
+        console.log('削除処理: ユーザーによる停止が検出されました');
         return;
       }
       
-      console.log('フォールバック削除処理を開始');
+      console.log('フロントエンド繰り返し処理による削除を開始');
       setIsLoading(true);
       setProgress(10);
-      setProgressMessage('削除対象の予定を検索中...');
+      setProgressMessage('カレンダーから削除対象の予定を検索中...');
       setCurrentProcessing({
         current: 0,
         total: 0,
         currentDate: '',
-        summary: '削除対象を検索中',
+        summary: '削除対象イベントを検索中',
         remaining: 0
       });
       
-      // まず削除対象を取得するAPIコールをシミュレート（停止チェック付き）
-      for (let delay = 0; delay < 500; delay += 50) {
+      // 削除対象検索の進捗表示
+      for (let delay = 0; delay < 300; delay += 50) {
         if (isStoppedByUser || abortController.signal.aborted) {
-          console.log('フォールバック削除: 初期遅延処理中にユーザーによる停止が検出されました');
-          return; // 即座に処理を終了
+          console.log('削除対象検索中にユーザーによる停止が検出されました');
+          return;
         }
         await new Promise(resolve => setTimeout(resolve, 50));
       }
       
-      setProgress(30);
-      setProgressMessage('削除処理を開始しています...');
-      setCurrentProcessing({
-        current: 0,
-        total: 0,
-        currentDate: '',
-        summary: '削除処理準備中',
-        remaining: 0
-      });
+      // まず削除対象のイベントリストを取得
+      setProgress(15);
+      setProgressMessage('削除対象イベントを取得中...');
       
-      // 実際の削除リクエスト（AbortController付き）
-      const response = await fetch(`/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}&action=delete`, {
+      const listResponse = await fetch(`/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}&action=list`, {
         method: "GET",
         signal: abortController.signal
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        const deletedCount = result.deletedCount || 0;
+      if (!listResponse.ok) {
+        const errorData = await listResponse.json();
         
-        // 削除中の進捗をシミュレート（並列処理フォールバック）
-        if (deletedCount > 0) {
-          setCurrentProcessing({
-            current: 0,
-            total: deletedCount,
-            currentDate: '',
-            summary: `${deletedCount}件の記念日を並列削除中...`,
-            remaining: deletedCount,
-            batchInfo: '通常処理モード（並列化）'
-          });
-          
-          // 並列処理をシミュレート（5件ずつのバッチ）
-          const BATCH_SIZE = 5;
-          const batches = Math.ceil(deletedCount / BATCH_SIZE);
-          
-          for (let batch = 1; batch <= batches; batch++) {
-            // 停止チェック（AbortController も含む）
-            if (isStoppedByUser || abortController.signal.aborted) {
-              console.log('フォールバック削除: バッチ処理中にユーザーによる停止が検出されました');
-              console.log(`停止時点: バッチ${batch-1}/${batches}完了`);
-              
-              const processedSoFar = (batch - 1) * BATCH_SIZE;
-              
-              // 停止時の状態を更新
-              setCurrentProcessing({
-                current: processedSoFar,
-                total: deletedCount,
-                currentDate: new Date().toLocaleDateString('ja-JP'),
-                summary: `削除処理停止: バッチ${batch-1}/${batches}完了、${deletedCount - processedSoFar}件未処理`,
-                remaining: deletedCount - processedSoFar,
-                batchInfo: `停止: バッチ${batch-1}/${batches}まで完了`
-              });
-              
-              return; // 即座に処理を終了
-            }
-            
-            const currentBatchSize = Math.min(BATCH_SIZE, deletedCount - (batch - 1) * BATCH_SIZE);
-            const processedSoFar = (batch - 1) * BATCH_SIZE + currentBatchSize;
-            const remaining = deletedCount - processedSoFar;
-            
-            // バッチ処理の遅延（停止チェック付き）
-            for (let delay = 0; delay < 300; delay += 30) {
-              if (isStoppedByUser || abortController.signal.aborted) {
-                console.log('フォールバック削除: 遅延処理中にユーザーによる停止が検出されました');
-                return; // 即座に処理を終了
-              }
-              await new Promise(resolve => setTimeout(resolve, 30));
-            }
-            
-            const progress = 30 + Math.floor((processedSoFar / deletedCount) * 60); // 30%から90%まで
-            
-            setProgress(progress);
-            setProgressMessage(`並列削除中: ${processedSoFar}/${deletedCount}件 (${Math.round((processedSoFar/deletedCount)*100)}%) - バッチ${batch}/${batches}完了`);
-            setCurrentProcessing({
-              current: processedSoFar,
-              total: deletedCount,
-              currentDate: new Date().toLocaleDateString('ja-JP'),
-              summary: `バッチ${batch}/${batches}: ${currentBatchSize}件並列削除完了`,
-              remaining: remaining,
-              batchInfo: `バッチ${batch}/${batches} (${currentBatchSize}件並列処理)`
-            });
-          }
+        if (errorData.error === 'auth_expired') {
+          setProgressMessage('❌ 認証の期限が切れました');
+          alert('認証の期限が切れました。再度ログインしてください。');
+          setTimeout(() => {
+            window.location.href = '/api/auth/signout';
+          }, 2000);
+          return;
         }
         
+        throw new Error(errorData.message || '削除対象の取得に失敗しました');
+      }
+
+      const listResult = await listResponse.json();
+      const eventsToDelete = listResult.events || [];
+      const totalCount = eventsToDelete.length;
+      
+      if (totalCount === 0) {
         setProgress(100);
-        setProgressMessage(`🗑️ 並列削除完了！ ${deletedCount}件の記念日を削除しました`);
+        setProgressMessage('削除対象のイベントが見つかりませんでした');
         setCurrentProcessing({
-          current: deletedCount,
-          total: deletedCount,
+          current: 0,
+          total: 0,
           currentDate: '',
-          summary: `${deletedCount}件の記念日の並列削除が完了しました`,
-          remaining: 0,
-          batchInfo: '全バッチ処理完了'
+          summary: '削除対象のイベントがありません',
+          remaining: 0
         });
-        
-        setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
-        setDeleteCalendarId('');
-        setShowDeleteConfirmation(false);
         
         setTimeout(() => {
           setProgress(0);
@@ -896,12 +689,164 @@ export default function AnniversaryForm() {
             remaining: 0
           });
           setIsLoading(false);
-          setCurrentAbortController(null); // AbortController をクリア
-          alert(`${deletedCount}件の予定を削除しました！`);
-        }, 3000);
-      } else {
+          setCurrentAbortController(null);
+          alert('削除対象のイベントが見つかりませんでした。');
+        }, 2000);
+        return;
+      }
+      
+      setProgress(20);
+      setProgressMessage(`${totalCount}件の記念日を順次削除中...`);
+      setCurrentProcessing({
+        current: 0,
+        total: totalCount,
+        currentDate: '',
+        summary: '個別削除処理を開始します',
+        remaining: totalCount
+      });
+
+      let deletedCount = 0;
+      let failedCount = 0;
+      
+      // 各イベントを個別に削除
+      for (let i = 0; i < eventsToDelete.length; i++) {
+        // 停止チェック（AbortController も含む）
+        if (isStoppedByUser || abortController.signal.aborted) {
+          console.log('個別削除処理中にユーザーによる停止が検出されました');
+          console.log(`停止時点: ${deletedCount}/${totalCount}件完了`);
+          console.log('AbortController状態:', {
+            isStoppedByUser,
+            signalAborted: abortController.signal.aborted,
+            abortReason: abortController.signal.reason
+          });
+          
+          // 停止時の状態を更新
+          setCurrentProcessing({
+            current: deletedCount,
+            total: totalCount,
+            currentDate: new Date().toLocaleDateString('ja-JP'),
+            summary: `処理停止: ${deletedCount}件削除、${failedCount}件失敗、${totalCount - deletedCount - failedCount}件未処理`,
+            remaining: totalCount - deletedCount - failedCount
+          });
+          
+          return; // 即座に処理を終了
+        }
+        
+        const event = eventsToDelete[i];
+        const currentNum = i + 1;
+        const remaining = totalCount - currentNum;
+        
+        try {
+          const deleteResponse = await fetch("/api/anniversary", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            signal: abortController.signal,
+            body: JSON.stringify({
+              action: 'delete-single',
+              calendarId: deleteCalendarId,
+              eventId: event.id
+            }),
+          });
+          
+          const responseData = await deleteResponse.json();
+          
+          if (deleteResponse.ok && responseData.success) {
+            deletedCount++;
+          } else if (responseData.error === 'auth_expired') {
+            // 認証エラーの場合は処理を停止し、ユーザーに再認証を促す
+            console.log('認証エラーが発生しました');
+            setProgressMessage('❌ 認証の期限が切れました');
+            setCurrentProcessing({
+              current: deletedCount,
+              total: totalCount,
+              currentDate: event.start?.date || new Date().toLocaleDateString('ja-JP'),
+              summary: `認証エラー: ${deletedCount}件削除済み、再認証が必要です`,
+              remaining: totalCount - deletedCount
+            });
+            
+            alert(`認証の期限が切れました。\n${deletedCount}件の記念日が削除されました。\n\n再度ログインしてから残りの削除を行ってください。`);
+            
+            // ログアウトして再認証を促す
+            setTimeout(() => {
+              window.location.href = '/api/auth/signout';
+            }, 2000);
+            
+            return; // 処理を停止
+          } else {
+            console.error(`イベント削除失敗: ${event.summary}`, responseData);
+            failedCount++;
+          }
+          
+        } catch (error) {
+          // AbortErrorの場合は、ユーザーによる停止として処理を終了
+          if (error instanceof Error && error.name === 'AbortError') {
+            console.log(`削除処理中断 (ユーザー停止): ${event.summary} - ${error.message}`);
+            // AbortErrorの場合は即座に処理を終了し、failedCountを増やさない
+            return;
+          }
+          
+          // その他のエラーの場合
+          console.log(`イベント削除エラー: ${event.summary}`, error);
+          failedCount++;
+        }
+        
+        const progress = 20 + Math.floor((currentNum / totalCount) * 70); // 20%から90%まで
+        setProgress(progress);
+        setProgressMessage(`記念日削除中: ${deletedCount}件完了 (残り${remaining}件)`);
+        
+        // 削除されたイベントの詳細表示
+        const eventTitle = event.summary || `記念日イベント ${currentNum}`;
+        const eventDate = event.start?.date || new Date().toLocaleDateString('ja-JP');
+        
+        setCurrentProcessing({
+          current: deletedCount,
+          total: totalCount,
+          currentDate: eventDate,
+          summary: `削除処理中: ${eventTitle}`,
+          remaining: remaining
+        });
+        
+        // レート制限対策の遅延処理（停止チェック付き）
+        try {
+          for (let delay = 0; delay < 100; delay += 20) {
+            if (isStoppedByUser || abortController.signal.aborted) {
+              console.log('削除遅延処理中にユーザーによる停止が検出されました');
+              return; // 即座に処理を終了
+            }
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+        } catch (delayError) {
+          // 遅延処理中のAbortErrorも適切に処理
+          if (delayError instanceof Error && delayError.name === 'AbortError') {
+            console.log('削除遅延処理中にAbortErrorが発生しました');
+            return;
+          }
+          console.error('削除遅延処理中に予期しないエラーが発生しました:', delayError);
+        }
+      }
+      
+      setProgress(100);
+      const successMessage = failedCount > 0 
+        ? `🗑️ 削除完了！ ${deletedCount}件成功、${failedCount}件失敗`
+        : `🗑️ 削除完了！ ${deletedCount}件の記念日を削除しました`;
+      
+      setProgressMessage(successMessage);
+      setCurrentProcessing({
+        current: deletedCount,
+        total: totalCount,
+        currentDate: new Date().toLocaleDateString('ja-JP'),
+        summary: `全ての削除処理が完了しました (成功: ${deletedCount}件, 失敗: ${failedCount}件)`,
+        remaining: 0,
+        batchInfo: '削除処理完了'
+      });
+      
+      setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
+      setDeleteCalendarId('');
+      setShowDeleteConfirmation(false);
+      
+      setTimeout(() => {
         setProgress(0);
-        setProgressMessage('❌ 削除に失敗しました');
+        setProgressMessage('');
         setCurrentProcessing({
           current: 0,
           total: 0,
@@ -911,17 +856,29 @@ export default function AnniversaryForm() {
         });
         setIsLoading(false);
         setCurrentAbortController(null); // AbortController をクリア
-        alert("削除中にエラーが発生しました");
-      }
+        
+        const message = failedCount > 0 
+          ? `${deletedCount}件の予定を削除しました。\n${failedCount}件の削除に失敗しました。`
+          : `${deletedCount}件の予定を削除しました！`;
+        alert(message);
+      }, 3000);
+      
     } catch (error) {
-      console.error('フォールバック削除エラー:', error);
+      console.error('フロントエンド削除エラー:', error);
       setCurrentAbortController(null); // AbortController をクリア
       
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('削除APIリクエストがユーザーによってキャンセルされました');
-        setProgressMessage('⏹️ 削除処理がキャンセルされました');
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          console.log('削除APIリクエストがユーザーによってキャンセルされました:', error.message);
+          setProgressMessage('⏹️ 削除処理がキャンセルされました');
+        } else {
+          console.error('予期しない削除エラー:', error.message);
+          setProgressMessage('❌ 削除中にエラーが発生しました');
+          alert(`削除中にエラーが発生しました: ${error.message}`);
+        }
       } else {
         setProgressMessage('❌ 削除中にエラーが発生しました');
+        alert("削除中にエラーが発生しました");
       }
       setProgress(0);
       setCurrentProcessing({
@@ -932,7 +889,6 @@ export default function AnniversaryForm() {
         remaining: 0
       });
       setIsLoading(false);
-      alert("削除中にエラーが発生しました");
     }
   };
 
