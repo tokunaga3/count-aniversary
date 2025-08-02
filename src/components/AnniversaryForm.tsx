@@ -28,6 +28,7 @@ export default function AnniversaryForm() {
   const [isDeleteMode, setIsDeleteMode] = useState<boolean>(false);
   const [isStoppedByUser, setIsStoppedByUser] = useState<boolean>(false); // ユーザーによる停止状態
   const [currentEventSource, setCurrentEventSource] = useState<EventSource | null>(null); // 現在のEventSource参照
+  const [currentAbortController, setCurrentAbortController] = useState<AbortController | null>(null); // 現在のAbortController参照
   const [currentProcessing, setCurrentProcessing] = useState<{
     current: number;
     total: number;
@@ -45,6 +46,8 @@ export default function AnniversaryForm() {
   // 停止ボタンの処理
   const handleStopProcessing = () => {
     console.log('ユーザーによる処理停止が要求されました');
+    
+    // 即座に停止状態を設定
     setIsStoppedByUser(true);
     
     // EventSourceを閉じる
@@ -54,39 +57,58 @@ export default function AnniversaryForm() {
       setCurrentEventSource(null);
     }
     
-    // 停止時の状態を表示
+    // 進行中のAPIリクエストをキャンセル
+    if (currentAbortController) {
+      console.log('進行中のAPIリクエストをキャンセルしています...');
+      currentAbortController.abort();
+      setCurrentAbortController(null);
+    }
+    
+    // 停止時の状態を即座に表示
     const processType = progressMessage.includes('削除') ? '削除' : '登録';
-    const stoppedMessage = `⏹️ ${processType}処理を停止しました`;
+    const stoppedMessage = `⏹️ ${processType}処理を停止中...`;
     
     setProgressMessage(stoppedMessage);
     
-    // 停止時の詳細情報を保持
+    // 現在の進捗情報を保持しつつ、停止状態を反映
     setCurrentProcessing(prev => ({
       ...prev,
-      summary: `${processType}処理が中断されました - ${prev.current}/${prev.total}件完了`
+      summary: `${processType}処理の停止処理中... - ${prev.current}/${prev.total}件完了`
     }));
     
+    // 少し待ってから最終状態を設定
     setTimeout(() => {
       const completedCount = currentProcessing.current;
       const totalCount = currentProcessing.total;
       const processTypeJa = processType === '削除' ? '削除' : '登録';
       
+      // 最終停止メッセージを設定
+      setProgressMessage(`⏹️ ${processTypeJa}処理を停止しました`);
+      setCurrentProcessing(prev => ({
+        ...prev,
+        summary: `${processTypeJa}処理が完全に停止されました - ${prev.current}/${prev.total}件完了`
+      }));
+      
+      // アラートで結果を表示
       alert(`${processTypeJa}処理を停止しました。\n完了: ${completedCount}件/${totalCount}件\n\n残り${totalCount - completedCount}件は未処理です。`);
       
-      // 状態をリセット
-      setProgress(0);
-      setProgressMessage('');
-      setCurrentProcessing({
-        current: 0,
-        total: 0,
-        currentDate: '',
-        summary: '',
-        batchInfo: ''
-      });
-      setIsLoading(false);
-      setIsStoppedByUser(false);
-      setCurrentEventSource(null); // EventSource参照もクリア
-    }, 2000);
+      // さらに少し待ってから状態をリセット
+      setTimeout(() => {
+        setProgress(0);
+        setProgressMessage('');
+        setCurrentProcessing({
+          current: 0,
+          total: 0,
+          currentDate: '',
+          summary: '',
+          batchInfo: ''
+        });
+        setIsLoading(false);
+        setIsStoppedByUser(false);
+        setCurrentEventSource(null);
+        setCurrentAbortController(null); // AbortController もクリア
+      }, 1000);
+    }, 500);
   };
 
 
@@ -98,6 +120,11 @@ export default function AnniversaryForm() {
     setProgressMessage('記念日の登録を開始しています...');
     setIsStoppedByUser(false); // 停止状態をリセット
     setCurrentEventSource(null); // EventSource参照をリセット
+    
+    // 新しいAbortControllerを作成
+    const abortController = new AbortController();
+    setCurrentAbortController(abortController);
+    
     setCurrentProcessing({
       current: 0,
       total: 0,
@@ -125,24 +152,32 @@ export default function AnniversaryForm() {
         estimatedCount: monthsDiff
       });
 
-      // SSE登録を試行
-      await trySSERegistration(titleToSend, intervalType, monthsDiff);
+      // 単発APIの繰り返し処理で記念日を登録
+      await performFallbackRegistration(titleToSend, intervalType, monthsDiff, abortController);
       
     } catch (error) {
       console.error('記念日登録エラー:', error);
-      setProgressMessage('❌ 登録中にエラーが発生しました');
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('APIリクエストがユーザーによってキャンセルされました');
+        setProgressMessage('⏹️ 処理がキャンセルされました');
+      } else {
+        setProgressMessage('❌ 登録中にエラーが発生しました');
+      }
       setProgress(0);
       setIsLoading(false);
+      setCurrentAbortController(null);
     }
   };
 
-  // SSE登録を試行する関数
+  // SSE登録を試行する関数（現在は使用しない - 単発APIの繰り返し処理を使用）
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const trySSERegistration = async (titleToSend: string, intervalType: string, estimatedCount: number) => {
+    /*
     try {
       const params = new URLSearchParams({
+        action: 'generate', // 新しいAPI仕様に合わせて修正
         startDate: date,
         endDate: endDate,
-        intervalType,
         comment: description,
         calenderId: calendarId,
         title: titleToSend,
@@ -306,91 +341,218 @@ export default function AnniversaryForm() {
       console.error('Failed to initialize SSE registration, using fallback:', initError);
       performFallbackRegistration(titleToSend, intervalType, estimatedCount);
     }
+    */
+    
+    // 直接フォールバック処理を呼び出し（SSEを使用しない）
+    console.log('単発APIの繰り返し処理を使用します');
+    const fallbackAbortController = new AbortController();
+    setCurrentAbortController(fallbackAbortController);
+    performFallbackRegistration(titleToSend, intervalType, estimatedCount, fallbackAbortController);
   };
 
-  // フォールバック用の通常登録処理（進捗バー付き）
-  const performFallbackRegistration = async (titleToSend: string, intervalType: string, estimatedCount: number) => {
+  // 単発APIの繰り返し処理による記念日登録（メイン処理）
+  const performFallbackRegistration = async (titleToSend: string, _intervalType: string, _estimatedCount: number, abortController: AbortController) => {
     try {
       // 停止チェック
-      if (isStoppedByUser) {
-        console.log('フォールバック登録処理: ユーザーによる停止が検出されました');
+      if (isStoppedByUser || abortController.signal.aborted) {
+        console.log('単発API登録処理: ユーザーによる停止が検出されました');
         return;
       }
       
-      setProgressMessage('通常の登録方式に切り替えました...');
+      console.log('単発APIの繰り返し処理による記念日登録を開始します');
+      setProgressMessage('記念日リストを生成中...');
+      setProgress(10);
       
-      const response = await fetch("/api/anniversary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          startDate: date,
-          endDate: endDate,
-          intervalType,
-          comment: description,
-          calenderId: calendarId,
-          title: titleToSend
-        }),
+      // まず記念日リストを生成（AbortController付き）
+      const generateResponse = await fetch(`/api/anniversary?action=generate&startDate=${encodeURIComponent(date)}&endDate=${encodeURIComponent(endDate)}&title=${encodeURIComponent(titleToSend)}&comment=${encodeURIComponent(description)}`, {
+        signal: abortController.signal
       });
-
-      setProgress(90);
-      setProgressMessage('最終処理中...');
-      setCurrentProcessing({
-        current: estimatedCount,
-        total: estimatedCount,
-        currentDate: endDate,
-        summary: '登録完了処理中'
-      });
-
-      if (response.ok) {
-        setProgress(100);
-        setProgressMessage('🎉 登録完了！');
-        setCurrentProcessing({
-          current: estimatedCount,
-          total: estimatedCount,
-          currentDate: endDate,
-          summary: '全ての記念日が登録されました'
-        });
+      
+      if (!generateResponse.ok) {
+        const errorData = await generateResponse.json();
         
-        const newDate: SpecialDate = {
-          id: crypto.randomUUID(),
-          calendarId,
-          title: titleToSend || '🎉 #回目の記念日 🎉',
-          date,
-          description,
-          countType: 'months',
-          repeatCount: 0
-        };
-        setSpecialDates([...specialDates, newDate]);
-        setCalendarId('');
-        setTitle('');
-        setDate('');
-        setEndDate('');
-        setDescription('');
+        if (errorData.error === 'auth_expired') {
+          setProgressMessage('❌ 認証の期限が切れました');
+          alert('認証の期限が切れました。再度ログインしてください。');
+          setTimeout(() => {
+            window.location.href = '/api/auth/signout';
+          }, 2000);
+          return;
+        }
         
-        setTimeout(() => {
-          setProgress(0);
-          setProgressMessage('');
-          setCurrentProcessing({
-            current: 0,
-            total: 0,
-            currentDate: '',
-            summary: ''
-          });
-          setIsLoading(false);
-          alert(`${estimatedCount}件の記念日を登録しました！`);
-        }, 2000);
-      } else {
-        setProgress(0);
-        setProgressMessage('❌ 登録に失敗しました');
-        setIsLoading(false);
-        alert("エラーが発生しました");
+        throw new Error(errorData.message || '記念日の生成に失敗しました');
       }
+      
+      const generateResult = await generateResponse.json();
+      const anniversaries = generateResult.anniversaries || [];
+      const totalCount = anniversaries.length;
+      
+      setProgress(20);
+      setProgressMessage(`${totalCount}件の記念日を順次登録中...`);
+      setCurrentProcessing({
+        current: 0,
+        total: totalCount,
+        currentDate: date,
+        summary: '個別登録処理中'
+      });
+
+      let createdCount = 0;
+      
+      // 各記念日を個別に登録
+      for (let i = 0; i < anniversaries.length; i++) {
+        // 停止チェック（AbortController も含む）
+        if (isStoppedByUser || abortController.signal.aborted) {
+          console.log('単発API登録: 個別登録中にユーザーによる停止が検出されました');
+          console.log(`停止時点: ${createdCount}/${totalCount}件完了`);
+          
+          // 停止時の状態を更新
+          setCurrentProcessing({
+            current: createdCount,
+            total: totalCount,
+            currentDate: anniversaries[i]?.date || date,
+            summary: `処理停止: ${createdCount}件完了、${totalCount - createdCount}件未処理`,
+            remaining: totalCount - createdCount
+          });
+          
+          return; // 即座に処理を終了
+        }
+        
+        const anniversary = anniversaries[i];
+        
+        try {
+          const createResponse = await fetch("/api/anniversary", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: abortController.signal, // AbortController を追加
+            body: JSON.stringify({
+              action: 'create-single',
+              calendarId: calendarId,
+              eventTitle: anniversary.title,
+              eventDate: anniversary.date,
+              description: anniversary.description
+            }),
+          });
+          
+          // レスポンスをJSONとして解析
+          const responseData = await createResponse.json();
+          
+          if (createResponse.ok && responseData.success) {
+            createdCount++;
+          } else if (responseData.error === 'auth_expired') {
+            // 認証エラーの場合は処理を停止し、ユーザーに再認証を促す
+            console.log('認証エラーが発生しました');
+            setProgressMessage('❌ 認証の期限が切れました');
+            setCurrentProcessing({
+              current: createdCount,
+              total: totalCount,
+              currentDate: anniversary.date,
+              summary: `認証エラー: ${createdCount}件完了、再認証が必要です`,
+              remaining: totalCount - createdCount
+            });
+            
+            alert(`認証の期限が切れました。\n${createdCount}件の記念日が登録されました。\n\n再度ログインしてから残りの登録を行ってください。`);
+            
+            // ログアウトして再認証を促す
+            setTimeout(() => {
+              window.location.href = '/api/auth/signout';
+            }, 2000);
+            
+            return; // 処理を停止
+          } else if (responseData.error === 'calendar_not_found') {
+            // カレンダーが見つからない場合
+            console.error('カレンダーが見つかりません:', responseData.message);
+            setProgressMessage('❌ カレンダーが見つかりません');
+            setCurrentProcessing({
+              current: createdCount,
+              total: totalCount,
+              currentDate: anniversary.date,
+              summary: `カレンダーエラー: ${responseData.message}`,
+              remaining: totalCount - createdCount
+            });
+            
+            alert(`カレンダーエラー: ${responseData.message}\n\n正しいカレンダーIDを確認してください。`);
+            return; // 処理を停止
+          } else {
+            console.error(`イベント作成失敗: ${anniversary.title}`, responseData);
+          }
+          
+          const progress = 20 + Math.floor((i + 1) / totalCount * 70); // 20%から90%まで
+          setProgress(progress);
+          setProgressMessage(`${createdCount}/${totalCount}件目を登録中...`);
+          setCurrentProcessing({
+            current: createdCount,
+            total: totalCount,
+            currentDate: anniversary.date,
+            summary: anniversary.title,
+            remaining: totalCount - createdCount
+          });
+          
+          // レート制限対策の遅延処理（停止チェック付き）
+          for (let delay = 0; delay < 100; delay += 10) {
+            if (isStoppedByUser || abortController.signal.aborted) {
+              console.log('単発API登録: 遅延処理中にユーザーによる停止が検出されました');
+              return; // 即座に処理を終了
+            }
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          
+        } catch (error) {
+          console.error(`イベント作成エラー: ${anniversary.title}`, error);
+        }
+      }
+
+      setProgress(100);
+      setProgressMessage('🎉 登録完了！');
+      setCurrentProcessing({
+        current: createdCount,
+        total: totalCount,
+        currentDate: endDate,
+        summary: `${createdCount}件の記念日が登録されました`
+      });
+        
+      const newDate: SpecialDate = {
+        id: crypto.randomUUID(),
+        calendarId,
+        title: titleToSend || '🎉 #回目の記念日 🎉',
+        date,
+        description,
+        countType: 'months',
+        repeatCount: 0
+      };
+      setSpecialDates([...specialDates, newDate]);
+      setCalendarId('');
+      setTitle('');
+      setDate('');
+      setEndDate('');
+      setDescription('');
+      
+      setTimeout(() => {
+        setProgress(0);
+        setProgressMessage('');
+        setCurrentProcessing({
+          current: 0,
+          total: 0,
+          currentDate: '',
+          summary: ''
+        });
+        setIsLoading(false);
+        setCurrentAbortController(null); // AbortController をクリア
+        alert(`${createdCount}件の記念日を登録しました！`);
+      }, 2000);
+        
     } catch (error) {
-      console.error('Fallback registration error:', error);
+      console.error('単発API登録エラー:', error);
+      setCurrentAbortController(null); // AbortController をクリア
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('APIリクエストがユーザーによってキャンセルされました');
+        setProgressMessage('⏹️ 処理がキャンセルされました');
+      } else {
+        setProgressMessage('❌ 登録中にエラーが発生しました');
+      }
       setProgress(0);
-      setProgressMessage('❌ 登録中にエラーが発生しました');
       setIsLoading(false);
-      alert("エラーが発生しました");
+      alert("処理中にエラーが発生しました");
     }
   };
 
@@ -401,6 +563,11 @@ export default function AnniversaryForm() {
     setProgressMessage('削除処理を開始しています...');
     setIsStoppedByUser(false); // 停止状態をリセット
     setCurrentEventSource(null); // EventSource参照をリセット
+    
+    // 新しいAbortControllerを作成
+    const abortController = new AbortController();
+    setCurrentAbortController(abortController);
+    
     setCurrentProcessing({
       current: 0,
       total: 0,
@@ -409,15 +576,15 @@ export default function AnniversaryForm() {
       batchInfo: ''
     });
     
-    // 開発環境でもSSEを有効にして詳細な進捗表示をテスト
-    const useSSE = true; // 常にSSEを使用
+    // 削除処理も単発APIを使用（SSEを使用しない）
+    const useSSE = false; // 単発APIの繰り返し処理を使用
     
     if (useSSE) {
       console.log('Attempting SSE connection for delete...');
       trySSEDelete();
     } else {
-      console.log('Using fallback delete approach for development...');
-      performFallbackDelete();
+      console.log('Using direct API approach for delete...');
+      performFallbackDelete(abortController);
     }
   };
 
@@ -551,9 +718,11 @@ export default function AnniversaryForm() {
               // ログアウトして再認証を促す
               window.location.href = '/api/auth/signout';
             } else {
-              // その他のエラーの場合はフォールバック
+              // その他のエラーの場合はフォールバック（仮のAbortController使用）
               console.error('SSE reported error, switching to fallback');
-              performFallbackDelete();
+              const fallbackAbortController = new AbortController();
+              setCurrentAbortController(fallbackAbortController);
+              performFallbackDelete(fallbackAbortController);
             }
           }
         } catch (parseError) {
@@ -561,7 +730,9 @@ export default function AnniversaryForm() {
           // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
           eventSource.close();
           setCurrentEventSource(null); // EventSource参照をクリア
-          performFallbackDelete();
+          const fallbackAbortController = new AbortController();
+          setCurrentAbortController(fallbackAbortController);
+          performFallbackDelete(fallbackAbortController);
         }
       };
       
@@ -572,20 +743,24 @@ export default function AnniversaryForm() {
         // clearTimeout(timeout); // タイムアウト無制限のためコメントアウト
         eventSource.close();
         setCurrentEventSource(null); // EventSource参照をクリア
-        performFallbackDelete();
+        const fallbackAbortController = new AbortController();
+        setCurrentAbortController(fallbackAbortController);
+        performFallbackDelete(fallbackAbortController);
       };
       
     } catch (initError) {
       console.error('❌ SSE削除初期化失敗, フォールバックを使用:', initError);
-      performFallbackDelete();
+      const fallbackAbortController = new AbortController();
+      setCurrentAbortController(fallbackAbortController);
+      performFallbackDelete(fallbackAbortController);
     }
   };
 
   // フォールバック用の通常削除処理（詳細進捗バー付き）
-  const performFallbackDelete = async () => {
+  const performFallbackDelete = async (abortController: AbortController) => {
     try {
       // 停止チェック
-      if (isStoppedByUser) {
+      if (isStoppedByUser || abortController.signal.aborted) {
         console.log('フォールバック削除処理: ユーザーによる停止が検出されました');
         return;
       }
@@ -602,8 +777,14 @@ export default function AnniversaryForm() {
         remaining: 0
       });
       
-      // まず削除対象を取得するAPIコールをシミュレート
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // まず削除対象を取得するAPIコールをシミュレート（停止チェック付き）
+      for (let delay = 0; delay < 500; delay += 50) {
+        if (isStoppedByUser || abortController.signal.aborted) {
+          console.log('フォールバック削除: 初期遅延処理中にユーザーによる停止が検出されました');
+          return; // 即座に処理を終了
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
       
       setProgress(30);
       setProgressMessage('削除処理を開始しています...');
@@ -615,9 +796,10 @@ export default function AnniversaryForm() {
         remaining: 0
       });
       
-      // 実際の削除リクエスト
+      // 実際の削除リクエスト（AbortController付き）
       const response = await fetch(`/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}&action=delete`, {
         method: "GET",
+        signal: abortController.signal
       });
 
       if (response.ok) {
@@ -640,17 +822,38 @@ export default function AnniversaryForm() {
           const batches = Math.ceil(deletedCount / BATCH_SIZE);
           
           for (let batch = 1; batch <= batches; batch++) {
-            // 停止チェック
-            if (isStoppedByUser) {
+            // 停止チェック（AbortController も含む）
+            if (isStoppedByUser || abortController.signal.aborted) {
               console.log('フォールバック削除: バッチ処理中にユーザーによる停止が検出されました');
-              break;
+              console.log(`停止時点: バッチ${batch-1}/${batches}完了`);
+              
+              const processedSoFar = (batch - 1) * BATCH_SIZE;
+              
+              // 停止時の状態を更新
+              setCurrentProcessing({
+                current: processedSoFar,
+                total: deletedCount,
+                currentDate: new Date().toLocaleDateString('ja-JP'),
+                summary: `削除処理停止: バッチ${batch-1}/${batches}完了、${deletedCount - processedSoFar}件未処理`,
+                remaining: deletedCount - processedSoFar,
+                batchInfo: `停止: バッチ${batch-1}/${batches}まで完了`
+              });
+              
+              return; // 即座に処理を終了
             }
             
             const currentBatchSize = Math.min(BATCH_SIZE, deletedCount - (batch - 1) * BATCH_SIZE);
             const processedSoFar = (batch - 1) * BATCH_SIZE + currentBatchSize;
             const remaining = deletedCount - processedSoFar;
             
-            await new Promise(resolve => setTimeout(resolve, 300)); // バッチ処理の遅延をシミュレート
+            // バッチ処理の遅延（停止チェック付き）
+            for (let delay = 0; delay < 300; delay += 30) {
+              if (isStoppedByUser || abortController.signal.aborted) {
+                console.log('フォールバック削除: 遅延処理中にユーザーによる停止が検出されました');
+                return; // 即座に処理を終了
+              }
+              await new Promise(resolve => setTimeout(resolve, 30));
+            }
             
             const progress = 30 + Math.floor((processedSoFar / deletedCount) * 60); // 30%から90%まで
             
@@ -693,6 +896,7 @@ export default function AnniversaryForm() {
             remaining: 0
           });
           setIsLoading(false);
+          setCurrentAbortController(null); // AbortController をクリア
           alert(`${deletedCount}件の予定を削除しました！`);
         }, 3000);
       } else {
@@ -706,12 +910,20 @@ export default function AnniversaryForm() {
           remaining: 0
         });
         setIsLoading(false);
+        setCurrentAbortController(null); // AbortController をクリア
         alert("削除中にエラーが発生しました");
       }
     } catch (error) {
       console.error('フォールバック削除エラー:', error);
+      setCurrentAbortController(null); // AbortController をクリア
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('削除APIリクエストがユーザーによってキャンセルされました');
+        setProgressMessage('⏹️ 削除処理がキャンセルされました');
+      } else {
+        setProgressMessage('❌ 削除中にエラーが発生しました');
+      }
       setProgress(0);
-      setProgressMessage('❌ 削除中にエラーが発生しました');
       setCurrentProcessing({
         current: 0,
         total: 0,
@@ -762,8 +974,20 @@ export default function AnniversaryForm() {
                   onClick={handleStopProcessing}
                   className="bg-gray-500 hover:bg-gray-600 text-white py-2 px-6 rounded-lg text-sm font-bold transition-all duration-300 flex items-center gap-2"
                 >
-                  ⏹️ 停止
+                  ⏹️ {progressMessage.includes('停止中') ? '停止処理中...' : '停止'}
                 </button>
+              )}
+              
+              {/* 停止処理中の表示 */}
+              {progressMessage.includes('停止中') && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-center">
+                  <div className="text-yellow-600 font-medium">
+                    🔄 処理を停止しています...
+                  </div>
+                  <div className="text-sm text-yellow-500 mt-1">
+                    現在実行中の処理が完了するまでお待ちください
+                  </div>
+                </div>
               )}
               
               {/* 進捗バー */}

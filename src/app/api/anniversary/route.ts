@@ -1,7 +1,140 @@
 import { google } from "googleapis";
+import type { calendar_v3 } from "googleapis";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+
+// Vercel configuration
+export const runtime = 'nodejs';
+export const maxDuration = 60; // 60 seconds (maximum for Vercel hobby plan)
+
+// 日付範囲の記念日を生成する関数
+function generateAnniversaries(startDate: string, endDate: string, titleTemplate?: string, description?: string, countType: 'years' | 'months' = 'months'): Array<{
+  title: string;
+  date: string;
+  description?: string;
+}> {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const anniversaries = [];
+  let iteration = 1;
+
+  const current = new Date(start);
+
+  // 年単位か月単位かを判定
+  const isYearsOnly = countType === 'years' || 
+    (titleTemplate && titleTemplate.includes('{{years}}') && 
+     !titleTemplate.includes('{{months}}') && 
+     !titleTemplate.includes('{{ym}}') && 
+     !titleTemplate.includes('{{count}}'));
+
+  // 最初の記念日日付を設定
+  if (isYearsOnly) {
+    current.setFullYear(start.getFullYear() + 1);
+  } else {
+    current.setMonth(start.getMonth() + 1);
+  }
+
+  // プレースホルダー置換関数
+  const replacePlaceholders = (template: string, iteration: number) => {
+    if (isYearsOnly) {
+      // 年単位の場合
+      return template
+        .replace(/\{\{count\}\}/g, iteration.toString())
+        .replace(/\{\{years\}\}/g, iteration.toString())
+        .replace(/\{\{months\}\}/g, '0')
+        .replace(/\{\{ym\}\}/g, `${iteration}年`);
+    } else {
+      // 月単位の場合
+      const years = Math.floor(iteration / 12);
+      const months = iteration % 12;
+      
+      let ymString;
+      if (iteration <= 11) {
+        ymString = `${iteration}ヶ月`;
+      } else {
+        if (months === 0) {
+          ymString = `${years}年0ヶ月`;
+        } else {
+          ymString = `${years}年${months}ヶ月`;
+        }
+      }
+      
+      return template
+        .replace(/\{\{count\}\}/g, iteration.toString())
+        .replace(/\{\{years\}\}/g, years.toString())
+        .replace(/\{\{months\}\}/g, months.toString())
+        .replace(/\{\{ym\}\}/g, ymString);
+    }
+  };
+
+  while (current <= end) {
+    let title;
+    if (titleTemplate) {
+      if (titleTemplate.includes('{{') && titleTemplate.includes('}}')) {
+        title = replacePlaceholders(titleTemplate, iteration);
+      } else {
+        // 従来の#置換システム（後方互換性）
+        const years = Math.floor((iteration - 1) / 12);
+        const months = ((iteration - 1) % 12) + 1;
+        
+        if (titleTemplate.includes("#年##ヶ月")) {
+          if (years === 0) {
+            title = titleTemplate.replace("#年##ヶ月", `${months}ヶ月`);
+          } else {
+            title = titleTemplate.replace("#年##ヶ月", `${years}年${months}ヶ月`);
+          }
+        } else if (titleTemplate.includes("#回目")) {
+          title = titleTemplate.replace("#", iteration.toString());
+        } else {
+          title = titleTemplate.replace("#", isYearsOnly ? `${iteration}年` : `${iteration}回目`);
+        }
+      }
+    } else {
+      if (isYearsOnly) {
+        title = `🎉 ${iteration}年記念日 🎉`;
+      } else {
+        title = `🎉 ${iteration}回目の記念日 🎉`;
+      }
+    }
+
+    anniversaries.push({
+      title,
+      date: current.toISOString().split('T')[0],
+      description: description || ''
+    });
+
+    iteration++;
+    
+    // 次の日付を計算
+    if (isYearsOnly) {
+      current.setFullYear(current.getFullYear() + 1);
+    } else {
+      const currentYear = current.getFullYear();
+      const currentMonth = current.getMonth();
+      const currentDay = current.getDate();
+      
+      let nextMonth = currentMonth + 1;
+      let nextYear = currentYear;
+      
+      if (nextMonth > 11) {
+        nextMonth = 0;
+        nextYear = currentYear + 1;
+      }
+      
+      current.setFullYear(nextYear);
+      current.setMonth(nextMonth);
+      current.setDate(currentDay);
+      
+      // 日付が存在しない場合の調整
+      if (current.getMonth() !== nextMonth) {
+        current.setDate(0);
+      }
+    }
+  }
+
+  return anniversaries;
+}
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -10,178 +143,92 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const { endDate, comment, calenderId: calendarId, startDate, title} = await req.json();
-    console.log('Received data:', { endDate, comment, calendarId, startDate, title });
-    
-    const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: session.accessToken });
+  // 認証エラーがある場合は再認証を促す
+  if (session.error === "RefreshAccessTokenError") {
+    console.log("リフレッシュトークンエラー - 再認証が必要");
+    return NextResponse.json({ 
+      error: "auth_expired",
+      message: "認証の期限が切れました。再度ログインしてください。" 
+    }, { status: 401 });
+  }
 
-    const start = startDate + 'T00:00:00.285Z'
-    const end = endDate + 'T23:59:59.999Z'
-    const calendar = google.calendar({ version: "v3", auth });
+  try {
+    const body = await req.json();
+    console.log('POST リクエスト受信:', body);
     
-    const currentDate = new Date(new Date(start).getTime() - 9 * 60 * 60 * 1000);
-    const endDateTime = new Date(new Date(end).getTime() - 9 * 60 * 60 * 1000);
-    let eventTitle;
-    let iteration = 1;
+    const { action, calendarId, eventTitle, eventDate, description } = body;
     
-    // タイトルに{{years}}のみが含まれているかチェック
-    const isYearsOnly = title && title.includes('{{years}}') && 
-                       !title.includes('{{months}}') && 
-                       !title.includes('{{ym}}') && 
-                       !title.includes('{{count}}');
-    
-    // プレースホルダー置換関数
-    const replacePlaceholders = (template: string, iteration: number, isYearly = false) => {
-      if (isYearly) {
-        // 年単位の場合
-        return template
-          .replace(/\{\{count\}\}/g, iteration.toString())
-          .replace(/\{\{years\}\}/g, iteration.toString())
-          .replace(/\{\{months\}\}/g, '0')
-          .replace(/\{\{ym\}\}/g, `${iteration}年`);
-      } else {
-        // 月単位の場合（従来通り）
-        const years = Math.floor(iteration / 12);
-        const months = iteration % 12;
-        
-        // ymString の生成
-        let ymString;
-        if (iteration <= 11) {
-          // 11ヶ月以下の場合は「Xヶ月」
-          ymString = `${iteration}ヶ月`;
-        } else {
-          // 12ヶ月以上の場合は「X年Yヶ月」
-          if (months === 0) {
-            ymString = `${years}年0ヶ月`;
-          } else {
-            ymString = `${years}年${months}ヶ月`;
-          }
-        }
-        
-        console.log(`Iteration ${iteration}: years=${years}, months=${months}, ymString=${ymString}`);
-        
-        // years と months の値を決定
-        let yearsValue, monthsValue;
-        if (iteration <= 11) {
-          // 11ヶ月以下の場合
-          yearsValue = '0';  // 0年
-          monthsValue = iteration.toString();  // 実際の月数
-        } else {
-          // 12ヶ月以上の場合
-          yearsValue = years.toString();
-          monthsValue = months.toString();
-        }
-        
-        return template
-          .replace(/\{\{count\}\}/g, iteration.toString())
-          .replace(/\{\{years\}\}/g, yearsValue)
-          .replace(/\{\{months\}\}/g, monthsValue)
-          .replace(/\{\{ym\}\}/g, ymString);
+    if (action === 'create-single') {
+      // 単一イベント作成
+      if (!calendarId || !eventTitle || !eventDate) {
+        return NextResponse.json({ error: "必要なパラメータが不足しています" }, { status: 400 });
       }
-    };
-    
-    
-    // 終了日付に達するまでループ（年単位または月単位）
-    while (currentDate <= endDateTime) {
-      console.log('Generating title for iteration:', iteration);
-      console.log('Current title template:', title);
-      console.log('Current date:', currentDate.toISOString());
-      console.log('End date:', endDateTime.toISOString());
-      
-      if (title === null || title === undefined || title.trim() === '') {
-        // タイトルが指定されていない場合のデフォルト
-        if (isYearsOnly) {
-          eventTitle = `🎉 ${iteration}年目の記念日 🎉`;
-        } else {
-          const years = Math.floor((iteration - 1) / 12);
-          const months = ((iteration - 1) % 12) + 1;
-          eventTitle = years === 0 
-            ? `🎉 ${months}ヶ月目の記念日 🎉`
-            : `🎉 ${years}年${months}ヶ月目の記念日 🎉`;
-        }
-      } else {
-        // 新しいプレースホルダーシステムを使用
-        if (title.includes('{{') && title.includes('}}')) {
-          eventTitle = replacePlaceholders(title, iteration, isYearsOnly);
-        } else {
-          // 従来の#置換システム（後方互換性のため残す）
-          const years = Math.floor((iteration - 1) / 12);
-          const months = ((iteration - 1) % 12) + 1;
-          
-          if (title.includes("#年##ヶ月")) {
-            if (years === 0) {
-              eventTitle = title.replace("#年##ヶ月", `${months}ヶ月`);
-            } else {
-              eventTitle = title.replace("#年##ヶ月", `${years}年${months}ヶ月`);
-            }
-          } else if (title.includes("#回目")) {
-            eventTitle = title.replace("#", iteration.toString());
-          } else {
-            if (years === 0) {
-              eventTitle = title.replace("#", `${months}ヶ月`);
-            } else {
-              eventTitle = title.replace("#", `${years}年${months}ヶ月`);
-            }
-          }
-        }
-      }
-      
-      console.log('Generated title:', eventTitle);
+
+      const auth = new google.auth.OAuth2();
+      auth.setCredentials({ access_token: session.accessToken });
+      const calendar = google.calendar({ version: "v3", auth });
 
       const event = {
         summary: eventTitle,
-        description: comment,
-        start: { dateTime: currentDate.toISOString(), timeZone: "Asia/Tokyo" },
+        description: description || "",
+        start: {
+          date: eventDate,
+          timeZone: "Asia/Tokyo",
+        },
         end: {
-          dateTime: new Date(currentDate.getTime() + 3600000).toISOString(),
+          date: eventDate,
           timeZone: "Asia/Tokyo",
         },
       };
-      console.log(event)
-      await calendar.events.insert({
-        calendarId: calendarId || "primary",
-        requestBody: event,
-      });
 
-      // 日付を進める
-      if (isYearsOnly) {
-        // 年単位の場合：1年進める
-        currentDate.setFullYear(currentDate.getFullYear() + 1);
-      } else {
-        // 月単位で日付を進める（より確実な方法）
-        const currentYear = currentDate.getFullYear();
-        const currentMonth = currentDate.getMonth();
-        const currentDay = currentDate.getDate();
+      try {
+        const createdEvent = await calendar.events.insert({
+          calendarId,
+          requestBody: event,
+        });
+
+        return NextResponse.json({
+          success: true,
+          message: "記念日を作成しました",
+          eventId: createdEvent.data.id
+        });
+      } catch (error: unknown) {
+        console.error("イベント作成エラー:", error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         
-        // 次の月の同じ日を計算
-        let nextMonth = currentMonth + 1;
-        let nextYear = currentYear;
-        
-        if (nextMonth > 11) {
-          nextMonth = 0;
-          nextYear = currentYear + 1;
+        // 認証関連のエラーを詳細にチェック
+        if (errorMessage.includes('Invalid Credentials') || 
+            errorMessage.includes('invalid_grant') ||
+            errorMessage.includes('unauthorized') ||
+            errorMessage.includes('401')) {
+          console.log("認証エラーを検出 - 再認証が必要");
+          return NextResponse.json({ 
+            success: false, 
+            error: "auth_expired",
+            message: "認証が期限切れです。再度ログインしてください。" 
+          }, { status: 401 });
         }
         
-        // 次の日付を設定
-        currentDate.setFullYear(nextYear);
-        currentDate.setMonth(nextMonth);
-        currentDate.setDate(currentDay);
-        
-        // 日付が存在しない場合（例：1/31の次の月が2/31になってしまう場合）の調整
-        if (currentDate.getMonth() !== nextMonth) {
-          // 月末日に調整
-          currentDate.setDate(0);
+        // カレンダーが見つからない場合
+        if (errorMessage.includes('Not Found') || errorMessage.includes('404')) {
+          return NextResponse.json({ 
+            success: false, 
+            error: "calendar_not_found",
+            message: `カレンダーID '${calendarId}' が見つかりません。正しいカレンダーIDを確認してください。` 
+          }, { status: 404 });
         }
+        
+        // その他のエラー
+        return NextResponse.json({ 
+          success: false, 
+          error: "event_creation_failed",
+          message: "イベントの作成に失敗しました",
+          details: errorMessage 
+        }, { status: 500 });
       }
-      
-      iteration++;
     }
 
-    return NextResponse.json({
-      message: "記念日をGoogleカレンダーに追加しました！",
-    });
+    return NextResponse.json({ error: "不明なアクション" }, { status: 400 });
   } catch (error) {
     return NextResponse.json(
       { error: (error as Error).message },
@@ -190,34 +237,95 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const action = searchParams.get('action');
-    const calendarId = searchParams.get('calendarId');
-    const streaming = searchParams.get('streaming') === 'true';
+    const session = await getServerSession(authOptions);
+    if (!session || !session.accessToken) {
+      return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+    }
 
-    // 削除処理の場合
-    if (action === 'delete') {
+    // 認証エラーがある場合は再認証を促す
+    if (session.error === "RefreshAccessTokenError") {
+      console.log("リフレッシュトークンエラー - 再認証が必要");
+      return NextResponse.json({ 
+        error: "auth_expired",
+        message: "認証の期限が切れました。再度ログインしてください。" 
+      }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const action = searchParams.get("action");
+    
+    // デバッグ用ログ
+    console.log('GET リクエスト受信:', {
+      url: request.url,
+      action,
+      allParams: Object.fromEntries(searchParams.entries())
+    });
+
+    // 削除対象取得または削除処理
+    if (action === "delete") {
+      const calendarId = searchParams.get("calendarId");
+      const streaming = searchParams.get("streaming") === "true";
+      
       if (!calendarId) {
-        return NextResponse.json({ error: "Calendar ID is required" }, { status: 400 });
+        return NextResponse.json({ error: "カレンダーIDが必要です" }, { status: 400 });
       }
 
       const auth = new google.auth.OAuth2();
       auth.setCredentials({ access_token: session.accessToken });
-
       const calendar = google.calendar({ version: "v3", auth });
 
-      // ストリーミング対応の場合
+      let anniversaryEvents: calendar_v3.Schema$Event[] = [];
+
+      try {
+        // 記念日イベントを検索
+        const eventsResponse = await calendar.events.list({
+          calendarId,
+          q: "記念日",
+          maxResults: 2500,
+          singleEvents: true,
+          orderBy: "startTime",
+        });
+
+        const events = eventsResponse.data.items || [];
+        anniversaryEvents = events.filter(event => 
+          event.summary?.includes("記念日") || 
+          event.summary?.includes("anniversary")
+        );
+      } catch (error: unknown) {
+        console.error("Calendar API エラー:", error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        
+        // 認証関連のエラーを詳細にチェック
+        if (errorMessage.includes('Invalid Credentials') || 
+            errorMessage.includes('invalid_grant') ||
+            errorMessage.includes('unauthorized') ||
+            errorMessage.includes('401')) {
+          return NextResponse.json({ 
+            error: "auth_expired",
+            message: "認証が期限切れです。再度ログインしてください。" 
+          }, { status: 401 });
+        }
+        
+        // カレンダーが見つからない場合
+        if (errorMessage.includes('Not Found') || errorMessage.includes('404')) {
+          return NextResponse.json({ 
+            error: "calendar_not_found",
+            message: `カレンダーID '${calendarId}' が見つかりません。` 
+          }, { status: 404 });
+        }
+        
+        return NextResponse.json({ 
+          error: "calendar_api_error",
+          message: "カレンダーAPIでエラーが発生しました",
+          details: errorMessage 
+        }, { status: 500 });
+      }
+
+      // ストリーミング削除処理（後方互換性）
       if (streaming) {
-        console.log('=== 削除SSEストリーム開始 ===');
-        console.log('削除対象カレンダーID:', calendarId);
+        console.log('SSE形式での削除処理開始');
         
         const encoder = new TextEncoder();
         let deletedCount = 0;
@@ -226,7 +334,6 @@ export async function GET(req: NextRequest) {
           async start(controller) {
             let isControllerClosed = false;
             
-            // コントローラーが閉じられたかどうかをチェックする関数
             const safeEnqueue = (data: Uint8Array) => {
               if (!isControllerClosed) {
                 try {
@@ -238,7 +345,6 @@ export async function GET(req: NextRequest) {
               }
             };
             
-            // コントローラーが閉じられたかをチェックして安全に close する関数
             const safeClose = () => {
               if (!isControllerClosed) {
                 try {
@@ -252,36 +358,7 @@ export async function GET(req: NextRequest) {
             };
             
             try {
-              console.log('削除SSEストリーム処理開始');
-              
-              // 初期メッセージを送信
-              console.log('初期進捗メッセージ送信');
-              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-                type: 'progress', 
-                progress: 5, 
-                message: '認証を確認中...' 
-              })}\n\n`));
-
-              // カレンダーIDに関連する全てのイベントを取得
-              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-                type: 'progress', 
-                progress: 10, 
-                message: '削除対象の予定を検索中...' 
-              })}\n\n`));
-
-              const eventsRes = await calendar.events.list({
-                calendarId,
-                timeMin: new Date('1000/1/1').toISOString(),
-                timeMax: new Date('9999/12/31').toISOString(),
-                singleEvents: true,
-                orderBy: "startTime",
-                maxResults: 2500,
-              });
-              
-              const events = eventsRes.data.items || [];
-              const eventCount = events.length;
-              
-              console.log(`Found ${eventCount} events to delete`);
+              const eventCount = anniversaryEvents.length;
               
               if (eventCount === 0) {
                 safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
@@ -294,171 +371,89 @@ export async function GET(req: NextRequest) {
                 return;
               }
 
+              // 初期進捗
               safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
                 type: 'progress', 
-                progress: 20, 
-                message: `削除開始: 0/${eventCount}件 (0%)`,
+                progress: 0, 
+                message: `削除開始: 0/${eventCount}件`,
                 current: 0,
                 total: eventCount,
                 currentDate: '',
-                summary: `${eventCount}件の記念日の並列削除を開始します`,
+                summary: `${eventCount}件の記念日の削除を開始します`,
                 remaining: eventCount
               })}\n\n`));
               
-              // 並列削除処理の設定
-              const BATCH_SIZE = 5; // 同時実行数（レート制限対策）
-              const DELAY_BETWEEN_BATCHES = 1000; // バッチ間の遅延（ミリ秒）
-              const RETRY_DELAY = 500; // リトライ時の遅延
-              
-              // イベントをバッチに分割
-              const batches: typeof events[] = [];
-              for (let i = 0; i < events.length; i += BATCH_SIZE) {
-                batches.push(events.slice(i, i + BATCH_SIZE));
-              }
-              
-              console.log(`Total ${eventCount} events divided into ${batches.length} batches of ${BATCH_SIZE} each`);
-              
-              // 各バッチを並列処理
-              for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-                // ストリームが閉じられている場合は処理を中断
-                if (isControllerClosed) {
-                  console.log('Stream closed, stopping deletion process');
-                  break;
-                }
+              // 各イベントを削除
+              for (let i = 0; i < anniversaryEvents.length; i++) {
+                const event = anniversaryEvents[i];
                 
-                const batch = batches[batchIndex];
-                console.log(`Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} events`);
-                
-                // バッチ内のイベントを並列削除
-                const deletePromises = batch.map(async (event, eventIndex) => {
-                  const globalIndex = batchIndex * BATCH_SIZE + eventIndex;
-                  
-                  if (!event.id) {
-                    console.log(`Event ${globalIndex} has no ID, skipping`);
-                    return { success: false, event, globalIndex, error: 'No event ID' };
-                  }
-                  
+                if (event.id) {
                   try {
                     await calendar.events.delete({
                       calendarId,
                       eventId: event.id,
                     });
-                    console.log(`Batch ${batchIndex + 1}: deleted event ${globalIndex + 1}: ${event.summary}`);
-                    return { success: true, event, globalIndex };
+                    deletedCount++;
+                    console.log(`deleted: ${event.summary}`);
                   } catch (deleteError: unknown) {
                     const error = deleteError as { status?: number; code?: number };
-                    console.error(`Batch ${batchIndex + 1}: Error deleting event ${event.id}:`, error);
+                    console.error(`Error deleting event ${event.id}:`, error);
                     
-                    // 認証エラーの場合は即座に中断
+                    // 認証エラーの場合
                     if (error.status === 401 || error.code === 401) {
-                      console.log('Authentication error during batch deletion, aborting');
-                      throw new Error('AUTH_EXPIRED');
-                    }
-                    
-                    // その他のエラーの場合は1回再試行
-                    try {
-                      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-                      await calendar.events.delete({
-                        calendarId,
-                        eventId: event.id,
-                      });
-                      console.log(`Batch ${batchIndex + 1}: deleted on retry event ${globalIndex + 1}: ${event.summary}`);
-                      return { success: true, event, globalIndex, retried: true };
-                    } catch (retryError: unknown) {
-                      const retryErr = retryError as { status?: number; code?: number };
-                      console.error(`Batch ${batchIndex + 1}: Retry failed for event ${event.id}:`, retryErr);
+                      safeEnqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: 'error',
+                        error: 'auth_expired',
+                        message: '認証が期限切れになりました。再ログインしてください。',
+                        processed: deletedCount,
+                        total: eventCount
+                      })}\n\n`));
                       
-                      if (retryErr.status === 401 || retryErr.code === 401) {
-                        console.log('Authentication error on retry, aborting');
-                        throw new Error('AUTH_EXPIRED');
-                      }
-                      
-                      return { success: false, event, globalIndex, error: retryErr };
+                      safeClose();
+                      return;
                     }
                   }
-                });
-                
-                try {
-                  // バッチ内の並列削除を実行
-                  const results = await Promise.allSettled(deletePromises);
-                  
-                  // 結果を処理
-                  for (const result of results) {
-                    if (result.status === 'fulfilled' && result.value.success) {
-                      deletedCount++;
-                    } else if (result.status === 'rejected') {
-                      // 認証エラーの場合は全体を中断
-                      if (result.reason?.message === 'AUTH_EXPIRED') {
-                        safeEnqueue(encoder.encode(`data: ${JSON.stringify({
-                          type: 'error',
-                          error: 'auth_expired',
-                          message: '認証が期限切れになりました。再ログインしてください。',
-                          processed: deletedCount,
-                          total: eventCount
-                        })}\n\n`));
-                        
-                        safeClose();
-                        return;
-                      }
-                    }
-                  }
-                  
-                  // ストリームが閉じられている場合は進捗送信をスキップ
-                  if (!isControllerClosed) {
-                    // 進捗を送信（20%から90%の範囲で）
-                    const processedBatches = batchIndex + 1;
-                    const progress = Math.min(90, 20 + Math.floor((processedBatches / batches.length) * 70));
-                    const remaining = eventCount - deletedCount;
-                    
-                    // 現在のバッチの最後のイベントの情報を取得
-                    const lastEvent = batch[batch.length - 1];
-                    const eventDate = lastEvent?.start?.dateTime || lastEvent?.start?.date || '';
-                    const currentDateStr = eventDate ? new Date(eventDate).toLocaleDateString('ja-JP') : '';
-                    
-                    const currentEventTitle = lastEvent?.summary ? 
-                      (lastEvent.summary.length > 50 ? lastEvent.summary.substring(0, 50) + '...' : lastEvent.summary) : 
-                      `バッチ${processedBatches}/${batches.length}処理中`;
-                    
-                    safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-                      type: 'progress', 
-                      progress, 
-                      message: `並列削除中: ${deletedCount}/${eventCount}件 (${Math.round((deletedCount / eventCount) * 100)}%) - バッチ${processedBatches}/${batches.length}完了`,
-                      current: deletedCount,
-                      total: eventCount,
-                      currentDate: currentDateStr,
-                      summary: currentEventTitle,
-                      remaining: remaining,
-                      batchInfo: `バッチ${processedBatches}/${batches.length} (${BATCH_SIZE}件並列処理)`
-                    })}\n\n`));
-                  }
-                  
-                } catch (batchError) {
-                  console.error(`Batch ${batchIndex + 1} processing error:`, batchError);
-                  // バッチエラーの場合も続行（一部のイベントは削除できている可能性があるため）
                 }
                 
-                // バッチ間の遅延（最後のバッチ以外）
-                if (batchIndex < batches.length - 1) {
-                  await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
-                }
-              }
-              
-              // 完了通知（ストリームが閉じられていない場合のみ）
-              if (!isControllerClosed) {
+                // 進捗を送信
+                const progress = Math.round(((i + 1) / eventCount) * 100);
+                const remaining = eventCount - deletedCount;
+                const eventDate = event.start?.dateTime || event.start?.date || '';
+                const currentDateStr = eventDate ? new Date(eventDate).toLocaleDateString('ja-JP') : '';
+                
+                const currentEventTitle = event.summary ? 
+                  (event.summary.length > 50 ? event.summary.substring(0, 50) + '...' : event.summary) : 
+                  '予定を削除中';
+                
                 safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-                  type: 'complete', 
-                  progress: 100, 
-                  message: `削除完了: ${deletedCount}/${eventCount}件 (100%)`, 
+                  type: 'progress', 
+                  progress, 
+                  message: `削除中: ${deletedCount}/${eventCount}件`,
                   current: deletedCount,
                   total: eventCount,
-                  summary: `${deletedCount}件の記念日を削除しました`,
-                  deletedCount 
+                  currentDate: currentDateStr,
+                  summary: currentEventTitle,
+                  remaining: remaining
                 })}\n\n`));
+                
+                // レート制限対策
+                await new Promise(resolve => setTimeout(resolve, 100));
               }
+              
+              // 完了通知
+              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'complete', 
+                progress: 100, 
+                message: `削除完了: ${deletedCount}/${eventCount}件`, 
+                current: deletedCount,
+                total: eventCount,
+                summary: `${deletedCount}件の記念日を削除しました`,
+                deletedCount 
+              })}\n\n`));
               
               safeClose();
             } catch (error) {
-              console.error('❌ 削除SSEストリームエラー:', error);
+              console.error('削除SSEストリームエラー:', error);
               const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
               safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
                 type: 'error', 
@@ -481,612 +476,233 @@ export async function GET(req: NextRequest) {
         });
       }
 
-      // 通常の削除処理（ストリーミングなし）
-      const eventsRes = await calendar.events.list({
-        calendarId,
-        timeMin: new Date('1000/1/1').toISOString(),
-        timeMax: new Date('9999/12/31').toISOString(),
-        singleEvents: true,
-        orderBy: "startTime",
-        maxResults: 2500,
-      });
-      
-      const events = eventsRes.data.items || [];
-      const eventCount = events.length;
-      
-      console.log(`Found ${eventCount} events to delete`);
-      
-      for (const event of events) {
-        if (event.id) {
-          await calendar.events.delete({
-            calendarId,
-            eventId: event.id,
-          });
-        }
-        console.log(`deleted: ${event.summary}`)
-      }
-      
+      // 通常のJSON応答（削除対象リストのみ）
       return NextResponse.json({
-        message: "記念日を削除しました！",
-        deletedCount: eventCount,
+        success: true,
+        events: anniversaryEvents.map(event => ({
+          id: event.id,
+          summary: event.summary,
+          start: event.start?.date || event.start?.dateTime
+        })),
+        totalCount: anniversaryEvents.length
       });
     }
 
-    // 通常のGET処理（登録用SSE）
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
-    const comment = searchParams.get('comment');
-    const calenderId = searchParams.get('calenderId');
-    const title = searchParams.get('title');
+    // 単一イベント削除
+    if (action === "delete-event") {
+      const calendarId = searchParams.get("calendarId");
+      const eventId = searchParams.get("eventId");
+      
+      if (!calendarId || !eventId) {
+        return NextResponse.json({ error: "カレンダーIDとイベントIDが必要です" }, { status: 400 });
+      }
 
-    if (!startDate || !endDate || !calenderId) {
-      return NextResponse.json({ error: "Missing required parameters" }, { status: 400 });
+      const auth = new google.auth.OAuth2();
+      auth.setCredentials({ access_token: session.accessToken });
+      const calendar = google.calendar({ version: "v3", auth });
+
+      try {
+        await calendar.events.delete({
+          calendarId,
+          eventId
+        });
+
+        return NextResponse.json({ success: true, message: "イベントを削除しました" });
+      } catch (error: unknown) {
+        console.error("イベント削除エラー:", error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return NextResponse.json({ 
+          success: false, 
+          error: "イベントの削除に失敗しました",
+          details: errorMessage 
+        }, { status: 500 });
+      }
     }
 
-    if (!streaming) {
-      return NextResponse.json({ error: "Only streaming mode supported" }, { status: 400 });
-    }
+    // 記念日生成（リストのみ）または登録処理
+    if (action === "generate") {
+      const startDate = searchParams.get("startDate");
+      const endDate = searchParams.get("endDate");
+      const title = searchParams.get("title");
+      const description = searchParams.get("comment");
+      const streaming = searchParams.get("streaming") === "true";
+      const calenderId = searchParams.get("calenderId");
 
-    const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: session.accessToken });
+      if (!startDate || !endDate) {
+        return NextResponse.json({ error: "開始日と終了日が必要です" }, { status: 400 });
+      }
 
-    const start = startDate + 'T00:00:00.285Z'
-    const end = endDate + 'T23:59:59.999Z'
-    const calendar = google.calendar({ version: "v3", auth });
-    
-    const encoder = new TextEncoder();
-    let createdCount = 0;
-    
-      const stream = new ReadableStream({
-        async start(controller) {
-          let isControllerClosed = false;
-          
-          // コントローラーが閉じられたかどうかをチェックする関数
-          const safeEnqueue = (data: Uint8Array) => {
-            if (!isControllerClosed) {
-              try {
-                controller.enqueue(data);
-              } catch (error) {
-                console.error('Controller enqueue error:', error);
-                isControllerClosed = true;
-              }
-            }
-          };
-          
-          // コントローラーが閉じられたかをチェックして安全に close する関数
-          const safeClose = () => {
-            if (!isControllerClosed) {
-              try {
-                controller.close();
-                isControllerClosed = true;
-              } catch (error) {
-                console.error('Controller close error:', error);
-                isControllerClosed = true;
-              }
-            }
-          };
-          
-          try {
-            console.log('Starting SSE stream for registration');
-            console.log('Parameters received:', { startDate, endDate, calenderId, title });
+      const anniversaries = generateAnniversaries(
+        startDate, 
+        endDate, 
+        title || undefined, 
+        description || undefined
+      );
+      
+      // ストリーミング要求の場合（後方互換性）
+      if (streaming && calenderId) {
+        console.log('SSE形式での登録処理開始');
+        
+        const encoder = new TextEncoder();
+        let createdCount = 0;
+        
+        const stream = new ReadableStream({
+          async start(controller) {
+            let isControllerClosed = false;
             
-            const currentDate = new Date(new Date(start).getTime() - 9 * 60 * 60 * 1000);
-            const endDateTime = new Date(new Date(end).getTime() - 9 * 60 * 60 * 1000);
-            let iteration = 1;
-            
-            // タイトルに{{years}}のみが含まれているかチェック
-            const isYearsOnly = title && title.includes('{{years}}') && 
-                               !title.includes('{{months}}') && 
-                               !title.includes('{{ym}}') && 
-                               !title.includes('{{count}}');
-            
-            // 総数を計算
-            const startDateTime = new Date(startDate);
-            const endDateTimeCalc = new Date(endDate);
-            let totalCount;
-            
-            if (isYearsOnly) {
-              // 年単位の場合
-              totalCount = endDateTimeCalc.getFullYear() - startDateTime.getFullYear() + 1;
-            } else {
-              // 月単位の場合
-              totalCount = (endDateTimeCalc.getFullYear() - startDateTime.getFullYear()) * 12 + 
-                          (endDateTimeCalc.getMonth() - startDateTime.getMonth()) + 1;
-            }
-            
-            console.log(`Total events to create: ${totalCount} (${isYearsOnly ? 'yearly' : 'monthly'})`);
-            
-            // プレースホルダー置換関数
-            const replacePlaceholders = (template: string, iteration: number, isYearly = false) => {
-              if (isYearly) {
-                // 年単位の場合
-                return template
-                  .replace(/\{\{count\}\}/g, iteration.toString())
-                  .replace(/\{\{years\}\}/g, iteration.toString())
-                  .replace(/\{\{months\}\}/g, '0')
-                  .replace(/\{\{ym\}\}/g, `${iteration}年`);
-              } else {
-                // 月単位の場合（従来通り）
-                const years = Math.floor(iteration / 12);
-                const months = iteration % 12;
-                
-                let ymString;
-                if (iteration <= 11) {
-                  ymString = `${iteration}ヶ月`;
-                } else {
-                  if (months === 0) {
-                    ymString = `${years}年0ヶ月`;
-                  } else {
-                    ymString = `${years}年${months}ヶ月`;
-                  }
+            const safeEnqueue = (data: Uint8Array) => {
+              if (!isControllerClosed) {
+                try {
+                  controller.enqueue(data);
+                } catch (error) {
+                  console.error('Controller enqueue error:', error);
+                  isControllerClosed = true;
                 }
-                
-                return template
-                  .replace(/\{\{count\}\}/g, iteration.toString())
-                  .replace(/\{\{years\}\}/g, years.toString())
-                  .replace(/\{\{months\}\}/g, months.toString())
-                  .replace(/\{\{ym\}\}/g, ymString);
               }
             };
-          
-          while (currentDate <= endDateTime) {
+            
+            const safeClose = () => {
+              if (!isControllerClosed) {
+                try {
+                  controller.close();
+                  isControllerClosed = true;
+                } catch (error) {
+                  console.error('Controller close error:', error);
+                  isControllerClosed = true;
+                }
+              }
+            };
+            
             try {
-              let eventTitle;
-              if (title && title.trim() !== '') {
-                eventTitle = replacePlaceholders(title, iteration, !!isYearsOnly);
-              } else {
-                if (isYearsOnly) {
-                  eventTitle = `🎉 ${iteration}年目の記念日 🎉`;
-                } else {
-                  eventTitle = `🎉 ${iteration}回目の記念日 🎉`;
-                }
-              }
+              const auth = new google.auth.OAuth2();
+              auth.setCredentials({ access_token: session.accessToken });
+              const calendar = google.calendar({ version: "v3", auth });
               
-              const eventStartTime = currentDate.toISOString();
-              const eventEndTime = new Date(currentDate.getTime() + 24 * 60 * 60 * 1000).toISOString();
+              const totalCount = anniversaries.length;
               
-              const event = {
-                summary: eventTitle,
-                description: comment || '',
-                start: {
-                  dateTime: eventStartTime,
-                  timeZone: 'Asia/Tokyo',
-                },
-                end: {
-                  dateTime: eventEndTime,
-                  timeZone: 'Asia/Tokyo',
-                },
-              };
-              
-              try {
-                await calendar.events.insert({
-                  calendarId: calenderId,
-                  requestBody: event,
-                });
-                
-                createdCount++;
-              } catch (insertError: unknown) {
-                const error = insertError as { status?: number; code?: number };
-                console.error(`Error creating event ${iteration + 1}:`, error);
-                
-                // 認証エラーの場合
-                if (error.status === 401 || error.code === 401) {
-                  console.log('Authentication error detected, sending error to client');
-                  safeEnqueue(encoder.encode(`data: ${JSON.stringify({
-                    type: 'error',
-                    error: 'auth_expired',
-                    message: '認証が期限切れになりました。再ログインしてください。',
-                    processed: createdCount,
-                    total: totalCount
-                  })}\n\n`));
-                  
-                  safeClose();
-                  return;
-                }
-                
-                // その他のエラーの場合、3回まで再試行
-                let retryCount = 0;
-                const maxRetries = 3;
-                let retrySuccess = false;
-                
-                while (retryCount < maxRetries && !retrySuccess) {
-                  retryCount++;
-                  console.log(`Retrying event ${iteration + 1}, attempt ${retryCount}/${maxRetries}`);
-                  
-                  try {
-                    // 1秒待機してから再試行
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    
-                    await calendar.events.insert({
-                      calendarId: calenderId,
-                      requestBody: event,
-                    });
-                    
-                    retrySuccess = true;
-                    createdCount++;
-                    console.log(`Event ${iteration + 1} created successfully on retry ${retryCount}`);
-                  } catch (retryError: unknown) {
-                    const retryErr = retryError as { status?: number; code?: number };
-                    console.error(`Retry ${retryCount} failed for event ${iteration + 1}:`, retryErr);
-                    
-                    if (retryErr.status === 401 || retryErr.code === 401) {
-                      console.log('Authentication error on retry, aborting');
-                      safeEnqueue(encoder.encode(`data: ${JSON.stringify({
-                        type: 'error',
-                        error: 'auth_expired',
-                        message: '認証が期限切れになりました。再ログインしてください。',
-                        processed: createdCount,
-                        total: totalCount
-                      })}\n\n`));
-                      
-                      safeClose();
-                      return;
-                    }
-                  }
-                }
-                
-                if (!retrySuccess) {
-                  console.log(`Failed to create event ${iteration + 1} after ${maxRetries} retries, continuing with next event`);
-                  // 失敗したイベントをスキップして続行
-                }
-              }
-              
-              const progress = Math.round((createdCount / totalCount) * 100);
-              const remaining = totalCount - createdCount;
-              
-              console.log(`Sending progress: ${createdCount}/${totalCount} (${progress}%)`);
-              
-              // 進捗データを送信
+              // 初期進捗
               safeEnqueue(encoder.encode(`data: ${JSON.stringify({
                 type: 'progress',
-                progress,
-                message: `${createdCount}/${totalCount}件目を登録中...`,
-                current: createdCount,
+                progress: 0,
+                message: `0/${totalCount}件目を登録中...`,
+                current: 0,
                 total: totalCount,
-                currentDate: currentDate.toLocaleDateString('ja-JP'),
-                summary: eventTitle,
-                remaining: remaining
+                currentDate: '',
+                summary: '登録開始',
+                remaining: totalCount
               })}\n\n`));
               
-              console.log(`Progress sent successfully for event ${createdCount}`);
-              
-              // 日付を進める
-              if (isYearsOnly) {
-                // 年単位の場合：1年進める
-                currentDate.setFullYear(currentDate.getFullYear() + 1);
-              } else {
-                // 月単位の場合：1ヶ月進める
-                currentDate.setMonth(currentDate.getMonth() + 1);
-              }
-              iteration++;
-              
-              // レート制限対策
-              await new Promise(resolve => setTimeout(resolve, 100));
-              
-            } catch (eventError) {
-              console.error(`Error creating event ${iteration}:`, eventError);
-              // エラーが発生してもスキップして続行
-              if (isYearsOnly) {
-                currentDate.setFullYear(currentDate.getFullYear() + 1);
-              } else {
-                currentDate.setMonth(currentDate.getMonth() + 1);
-              }
-              iteration++;
-            }
-          }
-          
-          // 完了メッセージを送信
-          safeEnqueue(encoder.encode(`data: ${JSON.stringify({
-            type: 'complete',
-            message: '登録完了！',
-            createdCount
-          })}\n\n`));
-          
-          safeClose();
-          
-        } catch (error) {
-          console.error('SSE stream error:', error);
-          safeEnqueue(encoder.encode(`data: ${JSON.stringify({
-            type: 'error',
-            message: 'エラーが発生しました',
-            error: (error as Error).message
-          })}\n\n`));
-          safeClose();
-        }
-      }
-    });
-
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control'
-      },
-    });
-
-  } catch (error) {
-    return NextResponse.json(
-      { error: (error as Error).message },
-      { status: 500 }
-    );
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
-    const { searchParams } = new URL(req.url);
-    const calendarId = searchParams.get('calendarId');
-    const streaming = searchParams.get('streaming') === 'true';
-
-    if (!calendarId) {
-      return NextResponse.json({ error: "Calendar ID is required" }, { status: 400 });
-    }
-
-    const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: session.accessToken });
-
-    const calendar = google.calendar({ version: "v3", auth });
-
-    // ストリーミング対応の場合
-    if (streaming) {
-      console.log('=== 削除SSEストリーム開始 ===');
-      console.log('削除対象カレンダーID:', calendarId);
-      
-      const encoder = new TextEncoder();
-      let deletedCount = 0;
-      
-      const stream = new ReadableStream({
-        async start(controller) {
-          let isControllerClosed = false;
-          
-          // コントローラーが閉じられたかどうかをチェックする関数
-          const safeEnqueue = (data: Uint8Array) => {
-            if (!isControllerClosed) {
-              try {
-                controller.enqueue(data);
-              } catch (error) {
-                console.error('Controller enqueue error:', error);
-                isControllerClosed = true;
-              }
-            }
-          };
-          
-          // コントローラーが閉じられたかをチェックして安全に close する関数
-          const safeClose = () => {
-            if (!isControllerClosed) {
-              try {
-                controller.close();
-                isControllerClosed = true;
-              } catch (error) {
-                console.error('Controller close error:', error);
-                isControllerClosed = true;
-              }
-            }
-          };
-          
-          try {
-            console.log('削除SSEストリーム処理開始');
-            
-            // 初期メッセージを送信
-            console.log('初期進捗メッセージ送信');
-            safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-              type: 'progress', 
-              progress: 5, 
-              message: '認証を確認中...' 
-            })}\n\n`));
-
-            // カレンダーIDに関連する全てのイベントを取得
-            safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-              type: 'progress', 
-              progress: 10, 
-              message: '削除対象の予定を検索中...' 
-            })}\n\n`));
-
-            const eventsRes = await calendar.events.list({
-              calendarId,
-              timeMin: new Date('1000/1/1').toISOString(),
-              timeMax: new Date('9999/12/31').toISOString(),
-              singleEvents: true,
-              orderBy: "startTime",
-              maxResults: 2500,
-            });
-            
-            const events = eventsRes.data.items || [];
-            const eventCount = events.length;
-            
-            console.log(`Found ${eventCount} events to delete`);
-            
-            if (eventCount === 0) {
-              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-                type: 'complete', 
-                progress: 100, 
-                message: '削除対象の予定が見つかりませんでした', 
-                deletedCount: 0 
-              })}\n\n`));
-              safeClose();
-              return;
-            }
-
-            safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-              type: 'progress', 
-              progress: 20, 
-              message: `削除開始: 0/${eventCount}件 (0%)`,
-              current: 0,
-              total: eventCount,
-              currentDate: '',
-              summary: `${eventCount}件の記念日の削除を開始します`,
-              remaining: eventCount
-            })}\n\n`));
-            
-            // 各イベントを削除
-            for (let i = 0; i < events.length; i++) {
-              const event = events[i];
-              
-              if (event.id) {
+              // 各記念日を登録
+              for (let i = 0; i < anniversaries.length; i++) {
+                const anniversary = anniversaries[i];
+                
                 try {
-                  await calendar.events.delete({
-                    calendarId,
-                    eventId: event.id,
+                  const event = {
+                    summary: anniversary.title,
+                    description: anniversary.description || "",
+                    start: {
+                      date: anniversary.date,
+                      timeZone: "Asia/Tokyo",
+                    },
+                    end: {
+                      date: anniversary.date,
+                      timeZone: "Asia/Tokyo",
+                    },
+                  };
+
+                  await calendar.events.insert({
+                    calendarId: calenderId,
+                    requestBody: event,
                   });
-                  deletedCount++;
-                  console.log(`deleted: ${event.summary}`);
-                } catch (deleteError: unknown) {
-                  const error = deleteError as { status?: number; code?: number };
-                  console.error(`Error deleting event ${event.id}:`, error);
                   
-                  // 認証エラーの場合
-                  if (error.status === 401 || error.code === 401) {
-                    console.log('Authentication error during deletion, aborting');
+                  createdCount++;
+                  
+                  const progress = Math.round((createdCount / totalCount) * 100);
+                  const remaining = totalCount - createdCount;
+                  
+                  safeEnqueue(encoder.encode(`data: ${JSON.stringify({
+                    type: 'progress',
+                    progress,
+                    message: `${createdCount}/${totalCount}件目を登録中...`,
+                    current: createdCount,
+                    total: totalCount,
+                    currentDate: new Date(anniversary.date).toLocaleDateString('ja-JP'),
+                    summary: anniversary.title,
+                    remaining: remaining
+                  })}\n\n`));
+                  
+                } catch (error: unknown) {
+                  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                  console.error(`イベント作成エラー: ${anniversary.title}`, errorMessage);
+                  
+                  // 認証エラーの場合は処理を中断
+                  if (errorMessage.includes('auth')) {
                     safeEnqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'error',
                       error: 'auth_expired',
                       message: '認証が期限切れになりました。再ログインしてください。',
-                      processed: deletedCount,
-                      total: eventCount
+                      processed: createdCount,
+                      total: totalCount
                     })}\n\n`));
                     
                     safeClose();
                     return;
                   }
-                  
-                  // その他のエラーの場合は1回再試行
-                  try {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    await calendar.events.delete({
-                      calendarId,
-                      eventId: event.id,
-                    });
-                    deletedCount++;
-                    console.log(`deleted on retry: ${event.summary}`);
-                  } catch (retryError: unknown) {
-                    const retryErr = retryError as { status?: number; code?: number };
-                    console.error(`Retry failed for event ${event.id}:`, retryErr);
-                    
-                    if (retryErr.status === 401 || retryErr.code === 401) {
-                      console.log('Authentication error on retry, aborting');
-                      safeEnqueue(encoder.encode(`data: ${JSON.stringify({
-                        type: 'error',
-                        error: 'auth_expired',
-                        message: '認証が期限切れになりました。再ログインしてください。',
-                        processed: deletedCount,
-                        total: eventCount
-                      })}\n\n`));
-                      
-                      safeClose();
-                      return;
-                    }
-                    
-                    console.log(`Failed to delete event: ${event.summary}, continuing with next event`);
-                  }
                 }
+                
+                // レート制限対策
+                await new Promise(resolve => setTimeout(resolve, 100));
               }
               
-              // 進捗を送信（20%から90%の範囲で）
-              const progress = Math.min(90, 20 + Math.floor((i + 1) / eventCount * 70));
-              const remaining = eventCount - deletedCount;
-              const eventDate = event.start?.dateTime || event.start?.date || '';
-              const currentDateStr = eventDate ? new Date(eventDate).toLocaleDateString('ja-JP') : '';
-              
-              // 削除中の予定のタイトルを取得（最初の50文字まで）
-              const currentEventTitle = event.summary ? 
-                (event.summary.length > 50 ? event.summary.substring(0, 50) + '...' : event.summary) : 
-                '予定を削除中';
-              
-              safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-                type: 'progress', 
-                progress, 
-                message: `削除中: ${deletedCount}/${eventCount}件 (${Math.round((deletedCount / eventCount) * 100)}%)`,
-                current: deletedCount,
-                total: eventCount,
-                currentDate: currentDateStr,
-                summary: currentEventTitle,
-                remaining: remaining
+              // 完了メッセージ
+              safeEnqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'complete',
+                message: '登録完了！',
+                createdCount
               })}\n\n`));
               
-              // APIレート制限対策で少し遅延
-              if (i % 5 === 0 && i > 0) {
-                await new Promise(resolve => setTimeout(resolve, 200));
-              }
+              safeClose();
+              
+            } catch (error) {
+              console.error('SSE stream error:', error);
+              safeEnqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'error',
+                message: 'エラーが発生しました',
+                error: (error as Error).message
+              })}\n\n`));
+              safeClose();
             }
-            
-            // 完了通知
-            safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-              type: 'complete', 
-              progress: 100, 
-              message: `削除完了: ${deletedCount}/${eventCount}件 (100%)`, 
-              current: deletedCount,
-              total: eventCount,
-              summary: `${deletedCount}件の記念日を削除しました`,
-              deletedCount 
-            })}\n\n`));
-            
-            safeClose();
-          } catch (error) {
-            console.error('❌ 削除SSEストリームエラー:', error);
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-            safeEnqueue(encoder.encode(`data: ${JSON.stringify({ 
-              type: 'error', 
-              message: errorMessage
-            })}\n\n`));
-            safeClose();
           }
-        }
-      });
+        });
 
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache, no-transform',
-          'Connection': 'keep-alive',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        },
-      });
-    }
-
-    // 通常の削除処理（ストリーミングなし）
-    const eventsRes = await calendar.events.list({
-      calendarId,
-      timeMin: new Date('1000/1/1').toISOString(),
-      timeMax: new Date('9999/12/31').toISOString(),
-      singleEvents: true,
-      orderBy: "startTime",
-      maxResults: 2500,
-    });
-    
-    const events = eventsRes.data.items || [];
-    const eventCount = events.length;
-    
-    console.log(`Found ${eventCount} events to delete`);
-    
-    for (const event of events) {
-      if (event.id) {
-        await calendar.events.delete({
-          calendarId,
-          eventId: event.id,
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Cache-Control'
+          },
         });
       }
-      console.log(`deleted: ${event.summary}`)
+      
+      // 通常のJSON応答（リストのみ）
+      return NextResponse.json({
+        success: true,
+        anniversaries,
+        totalCount: anniversaries.length
+      });
     }
-    
-    return NextResponse.json({
-      message: "記念日を削除しました！",
-      deletedCount: eventCount,
-    });
-  } catch (error) {
-    return NextResponse.json(
-      { error: (error as Error).message },
-      { status: 500 }
-    );
+
+    return NextResponse.json({ error: "不明なアクション" }, { status: 400 });
+
+  } catch (error: unknown) {
+    console.error("API エラー:", error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ 
+      error: "サーバーエラーが発生しました",
+      details: errorMessage 
+    }, { status: 500 });
   }
 }
 
