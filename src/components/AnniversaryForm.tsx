@@ -779,7 +779,7 @@ export default function AnniversaryForm() {
               console.log('並列削除中に認証エラーが発生');
               return { success: false, authError: true, event };
             } else {
-              console.error(`削除失敗 [${globalIndex + 1}/${totalCount}]: ${event.summary}`, responseData);
+              console.log(`削除失敗 [${globalIndex + 1}/${totalCount}]: ${event.summary}`, responseData);
               return { success: false, event, error: responseData };
             }
             
