@@ -1318,7 +1318,7 @@ export default function AnniversaryForm() {
                   className="bg-blue-500 text-white py-2 px-4 rounded-lg text-sm font-bold hover:bg-blue-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2"
                 >
                   <Calendar className="w-4 h-4" />
-                  カレンダー登録
+                  記念日を登録
                 </button>
               ) : (
                 <button
