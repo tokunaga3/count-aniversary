@@ -15,6 +15,8 @@ export default function CalendarSetup() {
   const [userCalendarName, setUserCalendarName] = useState('思い出カレンダー');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [wasRenamed, setWasRenamed] = useState(false);
+  const [originalName, setOriginalName] = useState('');
 
   // useEffectフックを使って認証チェックとリダイレクトを行う
   useEffect(() => {
@@ -47,6 +49,8 @@ export default function CalendarSetup() {
         setCalendarCreated(true);
         setCalendarId(data.calendarId);
         setCalendarName(data.calendarName);
+        setWasRenamed(data.wasRenamed || false);
+        setOriginalName(data.originalName || userCalendarName);
       } else {
         setError(data.error || 'カレンダーの作成に失敗しました');
       }
@@ -133,6 +137,20 @@ export default function CalendarSetup() {
               <div className="bg-green-50 text-green-600 p-4 rounded-lg mb-4">
                 カレンダーの作成が完了しました！
               </div>
+              
+              {/* カレンダー名変更通知 */}
+              {wasRenamed && (
+                <div className="bg-yellow-50 text-yellow-700 p-3 rounded-lg mb-4 text-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span>⚠️</span>
+                    <span className="font-medium">カレンダー名を変更しました</span>
+                  </div>
+                  <div className="text-xs">
+                    「{originalName}」は既に存在するため、「{calendarName}」として作成されました。
+                  </div>
+                </div>
+              )}
+              
               <p className="text-lg text-gray-700 mb-2">
                 カレンダー名: <span className="font-bold">{calendarName}</span>
               </p>
