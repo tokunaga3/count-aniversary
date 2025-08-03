@@ -21,10 +21,8 @@ export async function POST(req: NextRequest) {
 
     const calendar = google.calendar({ version: "v3", auth });
     
-    // ランダムなIDを生成（重複を避けるため）
-    const uniqueId = randomBytes(4).toString('hex');
     // ユーザーが指定した名前を使用
-    const calendarName = `${userCalendarName}-${uniqueId}`;
+    const calendarName = `${userCalendarName}`;
     
     // 新しいカレンダーを作成
     const newCalendar = await calendar.calendars.insert({

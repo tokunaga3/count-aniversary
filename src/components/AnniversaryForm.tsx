@@ -903,50 +903,40 @@ export default function AnniversaryForm() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => setTitle(prev => prev + '{{count}}')}
-                          className="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
+                          onClick={() => setTitle(prev => prev +  '結婚' + '{{count}}' + 'ヶ月目記念日🎉')}
+                          className="bg-pink-100 hover:bg-pink-200 text-pink-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex flex-col items-center gap-1"
                         >
-                          <span>📊</span>
-                          {'{{count}}'}
+                          <div className="font-bold text-lg text-pink-800">{'{{count}}'}</div>
+                          <div className="text-xs text-center">結婚{'{{count}}'}ヶ月目記念日🎉<br />↓<br />結婚13ヶ月目記念日🎉</div>
                         </button>
                         <button
                           type="button"
-                          onClick={() => setTitle(prev => prev + '{{ym}}')}
-                          className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
+                          onClick={() => setTitle(prev => prev +  '結婚' + '{{ym}}' + '記念日💍')}
+                          className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex flex-col items-center gap-1"
                         >
-                          <span>📅</span>
-                          {'{{ym}}'}
+                          <div className="font-bold text-lg text-green-800">{'{{ym}}'}</div>
+                          <div className="text-xs text-center">結婚{'{{ym}}'}記念日💍<br />↓<br />結婚1年1ヶ月記念日💍</div>
                         </button>
                         <button
                           type="button"
-                          onClick={() => setTitle(prev => prev + '{{years}}')}
-                          className="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-1 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
+                          onClick={() => setTitle(prev => prev + '祝！' + '{{years}}' + '年')}
+                          className="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex flex-col items-center gap-1"
                         >
-                          <span>🎂</span>
-                          {'{{years}}'}
+                          <div className="font-bold text-lg text-purple-800">{'{{years}}'}</div>
+                          <div className="text-xs text-center">祝！{'{{years}}'}年{'{{months}}'}ヶ月記念🎂<br />↓<br />祝！1年1ヶ月記念🎂</div>
                         </button>
                         <button
                           type="button"
-                          onClick={() => setTitle(prev => prev + '{{months}}')}
-                          className="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-1 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
+                          onClick={() => setTitle(prev => prev + '{{months}}' + 'ヶ月記念')}
+                          className="bg-yellow-100 hover:bg-yellow-200 text-yellow-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex flex-col items-center gap-1"
                         >
-                          <span>📆</span>
-                          {'{{months}}'}
+                          <div className="font-bold text-lg text-yellow-800">{'{{months}}'}</div>
+                           <div className="text-xs text-center">祝！{'{{years}}'}年{'{{months}}'}ヶ月記念🎂<br />↓<br />祝！1年1ヶ月記念🎂</div>
                         </button>
                       </div>
                     </div>
-                  </div>
-                  
-                  <div className="mt-2 text-sm text-gray-600">
-                    <div className="font-semibold mb-1">プレースホルダー例：</div>
-                    <div className="space-y-1 text-xs">
-                      <div>• <code className="bg-gray-100 px-1 rounded">結婚{'{{count}}'}ヶ月目記念日🎉</code> → 結婚13ヶ月目記念日🎉</div>
-                      <div>• <code className="bg-gray-100 px-1 rounded">結婚{'{{ym}}'}記念日💍</code> → 結婚1年1ヶ月記念日💍</div>
-                      <div>• <code className="bg-gray-100 px-1 rounded">祝！{'{{years}}'}年{'{{months}}'}ヶ月記念</code> → 祝！1年1ヶ月記念</div>
-                    </div>
-                  </div>
+                  </div>                                    
                 </div>
-
                 <div>
                   <label className="block text-lg font-medium text-blue-600 mb-2">
                     記念日 📅

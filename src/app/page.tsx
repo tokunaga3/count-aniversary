@@ -3,7 +3,6 @@ import LoginButton from "@/components/LoginButton";
 import LogoutButton from "@/components/LogoutButton";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { Star } from 'lucide-react';
 
 export default async function Home() {
   const session = await getServerSession(authOptions);
@@ -14,9 +13,7 @@ export default async function Home() {
         {/* ヘッダーセクション */}
         <header className="mb-12 animate-fade-in">
           <h1 className="text-4xl md:text-5xl font-bold text-blue-600 mb-4 flex items-center gap-3">
-            <Star className="text-yellow-400 animate-pulse w-8 h-8 md:w-10 md:h-10" />
             思い出カレンダー
-            <Star className="text-yellow-400 animate-pulse w-8 h-8 md:w-10 md:h-10" />
           </h1>
           <p className="text-blue-500 text-lg md:text-xl mb-8">楽しい予定と大切な記念日をメモしよう！</p>
           
