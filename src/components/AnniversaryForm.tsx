@@ -578,7 +578,7 @@ export default function AnniversaryForm() {
           }
           
           // その他のエラーの場合
-          console.error(`イベント作成エラー: ${anniversary.title}`, error);
+          console.log(`イベント作成エラー: ${anniversary.title}`, error);
         }
       }
 
@@ -1119,6 +1119,15 @@ export default function AnniversaryForm() {
                     : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200'
                 }`}>
                   <div className="space-y-3">
+                    {/* 現在の日付 */}
+                    {currentProcessing.currentDate && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-600">処理日付:</span>
+                        <span className="text-sm text-gray-800 font-mono bg-white px-2 py-1 rounded">
+                          {currentProcessing.currentDate}
+                        </span>
+                      </div>
+                    )}
                     {/* 全体進捗表示 - 削除処理用に詳細化 */}
                     {currentProcessing.total > 0 && (
                       <div className={`rounded-lg p-4 shadow-sm border-2 ${
@@ -1158,8 +1167,7 @@ export default function AnniversaryForm() {
                                 : '0%' 
                             }}
                           ></div>
-                        </div>
-                        
+                        </div>  
                         <div className="flex justify-between items-center">
                           <span className={`text-sm font-medium ${
                             progressMessage.includes('削除') ? 'text-red-600' : 'text-blue-600'
@@ -1175,7 +1183,7 @@ export default function AnniversaryForm() {
                         </div>
                       </div>
                     )}
-                    
+                        
                     {/* 残り件数表示 - より目立つように */}
                     {currentProcessing.remaining !== undefined && currentProcessing.remaining > 0 && (
                       <div className={`rounded-lg p-3 border-2 ${
@@ -1224,16 +1232,6 @@ export default function AnniversaryForm() {
                             {currentProcessing.summary}
                           </span>
                         </div>
-                      </div>
-                    )}
-                    
-                    {/* 現在の日付 */}
-                    {currentProcessing.currentDate && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-600">処理日付:</span>
-                        <span className="text-sm text-gray-800 font-mono bg-white px-2 py-1 rounded">
-                          {currentProcessing.currentDate}
-                        </span>
                       </div>
                     )}
                   </div>
