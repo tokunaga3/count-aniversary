@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { Calendar, Trash2, Loader2, Info } from 'lucide-react';
+import { Calendar, Loader2, Info } from 'lucide-react';
 
 interface SpecialDate {
   id: string;
@@ -23,9 +23,7 @@ export default function AnniversaryForm() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
   const [progressMessage, setProgressMessage] = useState<string>('');
-  const [deleteCalendarId, setDeleteCalendarId] = useState<string>('');
-  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState<boolean>(false);
-  const [isDeleteMode, setIsDeleteMode] = useState<boolean>(false);
+
   const [isStoppedByUser, setIsStoppedByUser] = useState<boolean>(false); // ユーザーによる停止状態
   const [currentEventSource, setCurrentEventSource] = useState<EventSource | null>(null); // 現在のEventSource参照
   const [currentAbortController, setCurrentAbortController] = useState<AbortController | null>(null); // 現在のAbortController参照
@@ -644,402 +642,19 @@ export default function AnniversaryForm() {
     }
   };
 
-  const handleDeleteByCalendarId = async () => {
-    if (!deleteCalendarId) return;
-    setIsLoading(true);
-    setProgress(0);
-    setProgressMessage('削除処理を開始しています...');
-    setIsStoppedByUser(false); // 停止状態をリセット
-    setCurrentEventSource(null); // EventSource参照をリセット
-    
-    // 新しいAbortControllerを作成
-    const abortController = new AbortController();
-    setCurrentAbortController(abortController);
-    
-    setCurrentProcessing({
-      current: 0,
-      total: 0,
-      currentDate: '',
-      summary: '削除準備中...'
-    });
-    
-    // 削除処理は単発APIのレスポンスのみ使用
-    console.log('Using direct API approach for delete...');
-    performDirectDelete(abortController);
-  };
-
-  // フロントエンド繰り返し処理による削除（メイン処理）
-  const performDirectDelete = async (abortController: AbortController) => {
-    try {
-      // 停止チェック
-      if (isStoppedByUser || abortController.signal.aborted) {
-        console.log('削除処理: ユーザーによる停止が検出されました');
-        return;
-      }
-      
-      console.log('フロントエンド繰り返し処理による削除を開始');
-      setIsLoading(true);
-      setProgress(10);
-      setProgressMessage('カレンダーから削除対象の予定を検索中...');
-      setCurrentProcessing({
-        current: 0,
-        total: 0,
-        currentDate: '',
-        summary: '削除対象イベントを検索中',
-        remaining: 0
-      });
-      
-      // 削除対象検索の進捗表示
-      for (let delay = 0; delay < 300; delay += 50) {
-        if (isStoppedByUser || abortController.signal.aborted) {
-          console.log('削除対象検索中にユーザーによる停止が検出されました');
-          return;
-        }
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-      
-      // まず削除対象のイベントリストを取得
-      setProgress(15);
-      setProgressMessage('削除対象イベントを取得中...');
-      
-      const listResponse = await fetch(`/api/anniversary?calendarId=${encodeURIComponent(deleteCalendarId)}&action=list`, {
-        method: "GET",
-        signal: abortController.signal
-      });
-
-      if (!listResponse.ok) {
-        const errorData = await listResponse.json();
-        
-        if (errorData.error === 'auth_expired') {
-          setProgressMessage('❌ 認証の期限が切れました');
-          alert('認証の期限が切れました。再度ログインしてください。');
-          setTimeout(() => {
-            window.location.href = '/api/auth/signout';
-          }, 2000);
-          return;
-        }
-        
-        throw new Error(errorData.message || '削除対象の取得に失敗しました');
-      }
-
-      const listResult = await listResponse.json();
-      const eventsToDelete = listResult.events || [];
-      const totalCount = eventsToDelete.length;
-      
-      if (totalCount === 0) {
-        setProgress(100);
-        setProgressMessage('削除対象のイベントが見つかりませんでした');
-        setCurrentProcessing({
-          current: 0,
-          total: 0,
-          currentDate: '',
-          summary: '削除対象のイベントがありません',
-          remaining: 0
-        });
-        
-        setTimeout(() => {
-          setProgress(0);
-          setProgressMessage('');
-          setCurrentProcessing({
-            current: 0,
-            total: 0,
-            currentDate: '',
-            summary: '',
-            remaining: 0
-          });
-          setIsLoading(false);
-          setCurrentAbortController(null);
-          alert('削除対象のイベントが見つかりませんでした。');
-        }, 2000);
-        return;
-      }
-      
-      setProgress(20);
-      setProgressMessage(`${totalCount}件の記念日を順次削除中...`);
-      setCurrentProcessing({
-        current: 0,
-        total: totalCount,
-        currentDate: '',
-        summary: '個別削除処理を開始します',
-        remaining: totalCount
-      });
-
-      let deletedCount = 0;
-      let failedCount = 0;
-      
-      // 各イベントを5個ずつ並列で削除
-      const batchSize = 5;
-      for (let i = 0; i < eventsToDelete.length; i += batchSize) {
-        // 停止チェック（AbortController も含む）
-        if (isStoppedByUser || abortController.signal.aborted) {
-          console.log('並列削除処理中にユーザーによる停止が検出されました');
-          console.log(`停止時点: ${deletedCount}/${totalCount}件完了`);
-          console.log('AbortController状態:', {
-            isStoppedByUser,
-            signalAborted: abortController.signal.aborted,
-            abortReason: abortController.signal.reason
-          });
-          
-          // 停止時の状態を更新
-          setCurrentProcessing({
-            current: deletedCount,
-            total: totalCount,
-            currentDate: new Date().toLocaleDateString('ja-JP'),
-            summary: `処理停止: ${deletedCount}件削除、${failedCount}件失敗、${totalCount - deletedCount - failedCount}件未処理`,
-            remaining: totalCount - deletedCount - failedCount
-          });
-          
-          return; // 即座に処理を終了
-        }
-        
-        const batch = eventsToDelete.slice(i, i + batchSize);
-        const batchNumber = Math.floor(i / batchSize) + 1;
-        const totalBatches = Math.ceil(eventsToDelete.length / batchSize);
-        
-        console.log(`バッチ ${batchNumber}/${totalBatches} (${batch.length}件) の並列削除を開始`);
-        
-        // バッチ処理状況を更新
-        setCurrentProcessing({
-          current: deletedCount,
-          total: totalCount,
-          currentDate: new Date().toLocaleDateString('ja-JP'),
-          summary: `並列削除処理中 (${batch.length}件同時実行)`,
-          remaining: totalCount - deletedCount - failedCount
-        });
-        
-        // 並列削除処理
-        const deletePromises = batch.map(async (event: { id: string; summary?: string; start?: { date?: string } }, batchIndex: number) => {
-          const globalIndex = i + batchIndex;
-          
-          try {
-            // 停止チェック
-            if (isStoppedByUser || abortController.signal.aborted) {
-              console.log(`バッチ内削除中断 (ユーザー停止): ${event.summary}`);
-              return { success: false, aborted: true, event };
-            }
-            
-            const deleteResponse = await fetch("/api/anniversary", {
-              method: "DELETE",
-              headers: { "Content-Type": "application/json" },
-              signal: abortController.signal,
-              body: JSON.stringify({
-                action: 'delete-single',
-                calendarId: deleteCalendarId,
-                eventId: event.id
-              }),
-            });
-            
-            const responseData = await deleteResponse.json();
-            
-            if (deleteResponse.ok && responseData.success) {
-              console.log(`削除成功 [${globalIndex + 1}/${totalCount}]: ${event.summary}`);
-              return { success: true, event };
-            } else if (responseData.error === 'auth_expired') {
-              console.log('並列削除中に認証エラーが発生');
-              return { success: false, authError: true, event };
-            } else {
-              console.log(`削除失敗 [${globalIndex + 1}/${totalCount}]: ${event.summary}`, responseData);
-              return { success: false, event, error: responseData };
-            }
-            
-          } catch (error) {
-            // AbortErrorの場合は、ユーザーによる停止として処理
-            if (error instanceof Error && error.name === 'AbortError') {
-              console.log(`並列削除中断 (ユーザー停止): ${event.summary} - ${error.message}`);
-              return { success: false, aborted: true, event };
-            }
-            
-            // その他のエラーの場合
-            console.error(`削除エラー [${globalIndex + 1}/${totalCount}]: ${event.summary}`, error);
-            return { success: false, event, error };
-          }
-        });
-        
-        try {
-          const results = await Promise.all(deletePromises);
-          
-          // 結果を集計
-          let batchDeletedCount = 0;
-          let batchFailedCount = 0;
-          let hasAuthError = false;
-          let hasAbortError = false;
-          
-          for (const result of results) {
-            if (result.success) {
-              batchDeletedCount++;
-            } else if (result.authError) {
-              hasAuthError = true;
-              break; // 認証エラーの場合は即座に処理を停止
-            } else if (result.aborted) {
-              hasAbortError = true;
-              break; // アボート時は即座に処理を停止
-            } else {
-              batchFailedCount++;
-            }
-          }
-          
-          // カウントを更新
-          deletedCount += batchDeletedCount;
-          failedCount += batchFailedCount;
-          
-          console.log(`バッチ ${batchNumber} 完了: 成功 ${batchDeletedCount}件, 失敗 ${batchFailedCount}件`);
-          
-          // 認証エラーまたはアボートの場合は処理を停止
-          if (hasAuthError) {
-            console.log('認証エラーのため並列削除処理を停止');
-            setProgressMessage('❌ 認証の期限が切れました');
-            setCurrentProcessing({
-              current: deletedCount,
-              total: totalCount,
-              currentDate: new Date().toLocaleDateString('ja-JP'),
-              summary: `認証エラー: ${deletedCount}件削除済み、再認証が必要です`,
-              remaining: totalCount - deletedCount
-            });
-            
-            alert(`認証の期限が切れました。\n${deletedCount}件の記念日が削除されました。\n\n再度ログインしてから残りの削除を行ってください。`);
-            
-            // ログアウトして再認証を促す
-            setTimeout(() => {
-              window.location.href = '/api/auth/signout';
-            }, 2000);
-            
-            return; // 処理を停止
-          }
-          
-          if (hasAbortError) {
-            console.log('ユーザー停止のため並列削除処理を終了');
-            return; // 処理を停止
-          }
-          
-        } catch (batchError) {
-          console.error(`バッチ ${batchNumber} 処理エラー:`, batchError);
-          failedCount += batch.length; // バッチ全体を失敗としてカウント
-        }
-        
-        // 進捗を更新
-        const processedCount = deletedCount + failedCount;
-        const progress = 20 + Math.floor((processedCount / totalCount) * 70); // 20%から90%まで
-        const remaining = totalCount - processedCount;
-        
-        setProgress(progress);
-        setProgressMessage(`並列削除中: ${deletedCount}件完了 (残り${remaining}件)`);
-        
-        setCurrentProcessing({
-          current: deletedCount,
-          total: totalCount,
-          currentDate: new Date().toLocaleDateString('ja-JP'),
-          summary: `削除処理完了: 成功 ${deletedCount}件, 失敗 ${failedCount}件`,
-          remaining: remaining
-        });
-        
-        // レート制限対策の遅延処理（バッチ間）
-        if (i + batchSize < eventsToDelete.length) { // 最後のバッチでない場合のみ
-          try {
-            for (let delay = 0; delay < 200; delay += 50) { // バッチ間は少し長めの遅延
-              if (isStoppedByUser || abortController.signal.aborted) {
-                console.log('バッチ間遅延処理中にユーザーによる停止が検出されました');
-                return; // 即座に処理を終了
-              }
-              await new Promise(resolve => setTimeout(resolve, 50));
-            }
-          } catch (delayError) {
-            // 遅延処理中のAbortErrorも適切に処理
-            if (delayError instanceof Error && delayError.name === 'AbortError') {
-              console.log('バッチ間遅延処理中にAbortErrorが発生しました');
-              return;
-            }
-            console.error('バッチ間遅延処理中に予期しないエラーが発生しました:', delayError);
-          }
-        }
-      }
-      
-      setProgress(100);
-      const successMessage = failedCount > 0 
-        ? `🗑️ 削除完了！ ${deletedCount}件成功、${failedCount}件失敗`
-        : `🗑️ 削除完了！ ${deletedCount}件の記念日を削除しました`;
-      
-      setProgressMessage(successMessage);
-      setCurrentProcessing({
-        current: deletedCount,
-        total: totalCount,
-        currentDate: new Date().toLocaleDateString('ja-JP'),
-        summary: `全ての削除処理が完了しました (成功: ${deletedCount}件, 失敗: ${failedCount}件)`,
-        remaining: 0
-      });
-      
-      setSpecialDates(specialDates.filter(date => date.calendarId !== deleteCalendarId));
-      setDeleteCalendarId('');
-      setShowDeleteConfirmation(false);
-      
-      setTimeout(() => {
-        setProgress(0);
-        setProgressMessage('');
-        setCurrentProcessing({
-          current: 0,
-          total: 0,
-          currentDate: '',
-          summary: '',
-          remaining: 0
-        });
-        setIsLoading(false);
-        setCurrentAbortController(null); // AbortController をクリア
-        
-        const message = failedCount > 0 
-          ? `${deletedCount}件の予定を削除しました。\n${failedCount}件の削除に失敗しました。`
-          : `${deletedCount}件の予定を削除しました！`;
-        alert(message);
-      }, 3000);
-      
-    } catch (error) {
-      console.error('フロントエンド削除エラー:', error);
-      setCurrentAbortController(null); // AbortController をクリア
-      
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          console.log('削除APIリクエストがユーザーによってキャンセルされました:', error.message);
-          setProgressMessage('⏹️ 削除処理がキャンセルされました');
-        } else {
-          console.error('予期しない削除エラー:', error.message);
-          setProgressMessage('❌ 削除中にエラーが発生しました');
-          alert(`削除中にエラーが発生しました: ${error.message}`);
-        }
-      } else {
-        setProgressMessage('❌ 削除中にエラーが発生しました');
-        alert("削除中にエラーが発生しました");
-      }
-      setProgress(0);
-      setCurrentProcessing({
-        current: 0,
-        total: 0,
-        currentDate: '',
-        summary: '',
-        remaining: 0
-      });
-      setIsLoading(false);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-100 via-blue-50 to-sky-100">
+    <div>
       {/* 進捗バーオーバーレイ */}
       {isLoading && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 transform scale-100 transition-all duration-300">
-            <div className="text-center space-y-4">
-              {/* アニメーション付きローダー */}
-              <div className="flex justify-center mb-4">
-                <div className="relative">
-                  {progressMessage.includes('削除') ? (
-                    <>
-                      <Loader2 className="w-12 h-12 text-red-500 animate-spin" />
-                      <div className="absolute inset-0 w-12 h-12 border-2 border-red-200 rounded-full animate-pulse"></div>
-                    </>
-                  ) : (
-                    <>
-                      <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
-                      <div className="absolute inset-0 w-12 h-12 border-2 border-blue-200 rounded-full animate-pulse"></div>
-                    </>
-                  )}
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] transform scale-100 transition-all duration-300 flex flex-col">
+            <div className="p-8 overflow-y-auto">
+              <div className="text-center space-y-4">
+                {/* アニメーション付きローダー */}
+                <div className="flex justify-center mb-4">
+                  <div className="relative">
+                    <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+                  <div className="absolute inset-0 w-12 h-12 border-2 border-blue-200 rounded-full animate-pulse"></div>
                 </div>
               </div>
               
@@ -1047,7 +662,7 @@ export default function AnniversaryForm() {
               <h3 className="text-xl font-bold text-gray-800">{progressMessage}</h3>
               
               {/* 進捗パーセンテージ */}
-              <div className={`text-lg font-semibold ${progressMessage.includes('削除') ? 'text-red-600' : 'text-blue-600'}`}>
+              <div className="text-lg font-semibold text-blue-600">
                 {progress}%完了
               </div>
               
@@ -1077,11 +692,7 @@ export default function AnniversaryForm() {
               <div className="space-y-2">
                 <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
                   <div 
-                    className={`h-4 rounded-full transition-all duration-700 ease-out relative overflow-hidden ${
-                      progressMessage.includes('削除') 
-                        ? 'bg-gradient-to-r from-red-500 via-red-600 to-red-700' 
-                        : 'bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-600'
-                    }`}
+                    className="h-4 rounded-full transition-all duration-700 ease-out relative overflow-hidden bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-600"
                     style={{ width: `${progress}%` }}
                   >
                     {/* 進捗バーのアニメーション効果 */}
@@ -1091,33 +702,17 @@ export default function AnniversaryForm() {
                 
                 {/* 進捗ステップ表示 */}
                 <div className="flex justify-between text-xs text-gray-500 mt-2">
-                  {progressMessage.includes('削除') ? (
-                    <>
-                      <span className={progress >= 10 ? "text-red-600 font-semibold" : ""}>検索</span>
-                      <span className={progress >= 20 ? "text-red-600 font-semibold" : ""}>開始</span>
-                      <span className={progress >= 50 ? "text-red-600 font-semibold" : ""}>削除中</span>
-                      <span className={progress >= 90 ? "text-red-600 font-semibold" : ""}>完了処理</span>
-                      <span className={progress >= 100 ? "text-green-600 font-semibold" : ""}>完了</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className={progress >= 10 ? "text-blue-600 font-semibold" : ""}>開始</span>
-                      <span className={progress >= 30 ? "text-blue-600 font-semibold" : ""}>処理中</span>
-                      <span className={progress >= 60 ? "text-blue-600 font-semibold" : ""}>登録中</span>
-                      <span className={progress >= 90 ? "text-blue-600 font-semibold" : ""}>最終処理</span>
-                      <span className={progress >= 100 ? "text-green-600 font-semibold" : ""}>完了</span>
-                    </>
-                  )}
+                  <span className={progress >= 10 ? "text-blue-600 font-semibold" : ""}>開始</span>
+                  <span className={progress >= 30 ? "text-blue-600 font-semibold" : ""}>処理中</span>
+                  <span className={progress >= 60 ? "text-blue-600 font-semibold" : ""}>登録中</span>
+                  <span className={progress >= 90 ? "text-blue-600 font-semibold" : ""}>最終処理</span>
+                  <span className={progress >= 100 ? "text-green-600 font-semibold" : ""}>完了</span>
                 </div>
               </div>
               
               {/* 詳細進捗情報表示 */}
               {(currentProcessing.total > 0 || currentProcessing.summary) && (
-                <div className={`mt-4 p-4 rounded-lg border ${
-                  progressMessage.includes('削除') 
-                    ? 'bg-gradient-to-r from-red-50 to-pink-50 border-red-200' 
-                    : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200'
-                }`}>
+                <div className="mt-4 p-4 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200 max-h-96 overflow-y-auto">
                   <div className="space-y-3">
            
                     {/* 処理期間表示 - 記念日と終了日を表示 */}
@@ -1155,25 +750,17 @@ export default function AnniversaryForm() {
                     )}
                     {/* 全体進捗表示 - 削除処理用に詳細化 */}
                     {currentProcessing.total > 0 && (
-                      <div className={`rounded-lg p-4 shadow-sm border-2 ${
-                        progressMessage.includes('削除') 
-                          ? 'bg-red-50 border-red-200' 
-                          : 'bg-blue-50 border-blue-200'
-                      }`}>
+                      <div className="rounded-lg p-4 shadow-sm border-2 bg-blue-50 border-blue-200">
                         <div className="flex items-center justify-between mb-3">
-                          <span className={`text-lg font-bold ${
-                            progressMessage.includes('削除') ? 'text-red-700' : 'text-blue-700'
-                          }`}>
-                            {progressMessage.includes('削除') ? '🗑️ 削除進捗' : '📝 登録進捗'}
+                          <span className="text-lg font-bold text-blue-700">
+                            📝 登録進捗
                           </span>
                           <div className="text-right">
-                            <div className={`text-2xl font-bold ${
-                              progressMessage.includes('削除') ? 'text-red-600' : 'text-blue-600'
-                            }`}>
+                            <div className="text-2xl font-bold text-blue-600">
                               {currentProcessing.current} / {currentProcessing.total}
                             </div>
                             <div className="text-sm text-gray-600">
-                              {progressMessage.includes('削除') ? '個削除済み' : '個登録済み'}
+                              個登録済み
                             </div>
                           </div>
                         </div>
@@ -1181,11 +768,7 @@ export default function AnniversaryForm() {
                         {/* 進捗バー */}
                         <div className="w-full bg-gray-200 rounded-full h-3 mb-2">
                           <div 
-                            className={`h-3 rounded-full transition-all duration-500 ${
-                              progressMessage.includes('削除') 
-                                ? 'bg-gradient-to-r from-red-500 to-red-700' 
-                                : 'bg-gradient-to-r from-blue-400 to-blue-600'
-                            }`}
+                            className="h-3 rounded-full transition-all duration-500 bg-gradient-to-r from-blue-400 to-blue-600"
                             style={{ 
                               width: currentProcessing.total > 0 
                                 ? `${Math.round((currentProcessing.current / currentProcessing.total) * 100)}%` 
@@ -1194,9 +777,7 @@ export default function AnniversaryForm() {
                           ></div>
                         </div>  
                         <div className="flex justify-between items-center">
-                          <span className={`text-sm font-medium ${
-                            progressMessage.includes('削除') ? 'text-red-600' : 'text-blue-600'
-                          }`}>
+                          <span className="text-sm font-medium text-blue-600">
                             {currentProcessing.total > 0 
                               ? `${Math.round((currentProcessing.current / currentProcessing.total) * 100)}%完了`
                               : '0%完了'
@@ -1210,22 +791,16 @@ export default function AnniversaryForm() {
                     )}
                         
                     {/* 残り件数表示 - より目立つように */}
-                    {currentProcessing.remaining !== undefined && currentProcessing.remaining > 0 && (
-                      <div className={`rounded-lg p-3 border-2 ${
-                        progressMessage.includes('削除') 
-                          ? 'bg-orange-50 border-orange-200' 
-                          : 'bg-yellow-50 border-yellow-200'
-                      }`}>
+                    {(currentProcessing.remaining !== undefined && currentProcessing.remaining > 0) && (
+                      <div className="rounded-lg p-3 border-2 bg-yellow-50 border-yellow-200">
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-medium text-gray-700">残り件数:</span>
                           <div className="text-right">
-                            <span className={`text-xl font-bold ${
-                              progressMessage.includes('削除') ? 'text-orange-600' : 'text-yellow-600'
-                            }`}>
+                            <span className="text-xl font-bold text-yellow-600">
                               {currentProcessing.remaining}件
                             </span>
                             <div className="text-xs text-gray-500">
-                              {progressMessage.includes('削除') ? '削除待ち' : '登録待ち'}
+                              登録待ち
                             </div>
                           </div>
                         </div>
@@ -1234,26 +809,14 @@ export default function AnniversaryForm() {
                     
                     {/* 現在の処理対象 - より詳細に */}
                     {currentProcessing.summary && (
-                      <div className={`rounded-lg p-4 border-2 ${
-                        progressMessage.includes('削除') 
-                          ? 'bg-red-50 border-red-200' 
-                          : 'bg-green-50 border-green-200'
-                      }`}>
+                      <div className="rounded-lg p-4 border-2 bg-green-50 border-green-200">
                         <div className="flex items-start justify-between mb-2">
-                          <span className={`text-sm font-bold ${
-                            progressMessage.includes('削除') ? 'text-red-700' : 'text-green-700'
-                          }`}>
-                            {progressMessage.includes('削除') ? '🗑️ 削除中の予定:' : '📝 現在の処理:'}
+                          <span className="text-sm font-bold text-green-700">
+                            📝 現在の処理:
                           </span>
                         </div>
-                        <div className={`p-3 rounded border ${
-                          progressMessage.includes('削除') 
-                            ? 'bg-white border-red-100' 
-                            : 'bg-white border-green-100'
-                        }`}>
-                          <span className={`text-sm font-medium ${
-                            progressMessage.includes('削除') ? 'text-red-800' : 'text-gray-800'
-                          }`}>
+                        <div className="p-3 rounded border bg-white border-green-100">
+                          <span className="text-sm font-medium text-gray-800">
                             {currentProcessing.summary}
                           </span>
                         </div>
@@ -1282,99 +845,30 @@ export default function AnniversaryForm() {
               
               {/* 完了時の詳細アニメーション */}
               {progress === 100 && (
-                <div className={`p-4 rounded-lg border-2 text-center ${
-                  progressMessage.includes('削除') 
-                    ? 'bg-red-50 border-red-200 text-red-700' 
-                    : 'bg-green-50 border-green-200 text-green-700'
-                }`}>
+                <div className="p-4 rounded-lg border-2 text-center bg-green-50 border-green-200 text-green-700">
                   <div className="animate-bounce text-3xl mb-2">
-                    {progressMessage.includes('削除') ? '🗑️' : '✅'}
+                    ✅
                   </div>
                   <div className="text-lg font-bold mb-1">
-                    {progressMessage.includes('削除') ? '削除完了！' : '登録完了！'}
+                    登録完了！
                   </div>
                   {currentProcessing.total > 0 && (
                     <div className="text-sm font-medium">
-                      {progressMessage.includes('削除') 
-                        ? `${currentProcessing.total}個のイベントの削除が完了しました`
-                        : `${currentProcessing.total}個のイベントの登録が完了しました`
-                      }
+                      {currentProcessing.total}個のイベントの登録が完了しました
                     </div>
                   )}
                 </div>
               )}
+              </div>
             </div>
           </div>
         </div>
       )}
       
-      <div className="container mx-auto p-6">
-          <div className="flex justify-between items-center mb-8">
-            <div></div> {/* 左側を空にする */}
-            <div className="flex gap-4">
-              {isDeleteMode ? (
-                <button
-                  onClick={() => setIsDeleteMode(false)}
-                  className="bg-blue-500 text-white py-2 px-4 rounded-lg text-sm font-bold hover:bg-blue-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2"
-                >
-                  <Calendar className="w-4 h-4" />
-                  記念日を登録
-                </button>
-              ) : (
-                <button
-                  onClick={() => setIsDeleteMode(true)}
-                  className="bg-red-500 text-white py-2 px-4 rounded-lg text-sm font-bold hover:bg-red-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  予定を削除
-                </button>
-              )}
-            </div>
-          </div>
-
-          {isDeleteMode ? (
-            <div className={`bg-white rounded-2xl shadow-xl p-8 mb-8 ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
-              <h2 className="text-2xl font-bold text-red-600 mb-4">予定を削除</h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-lg font-medium text-blue-600 mb-2">
-                    カレンダーID 🔑
-                  </label>
-                  <input
-                    type="text"
-                    value={deleteCalendarId}
-                    onChange={(e) => setDeleteCalendarId(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
-                    placeholder="例：family-calendar"
-                    required
-                    disabled={isLoading}
-                  />
-                </div>
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => setShowDeleteConfirmation(true)}
-                    className="flex-1 bg-red-500 text-white py-3 px-6 rounded-xl text-lg font-bold hover:bg-red-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={!deleteCalendarId || isLoading}
-                  >
-                    <Trash2 className="w-6 h-6" />
-                    削除する
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsDeleteMode(false);
-                      setDeleteCalendarId('');
-                    }}
-                    className="flex-1 bg-gray-200 text-gray-700 py-3 px-6 rounded-xl text-lg font-bold hover:bg-gray-300 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isLoading}
-                  >
-                    キャンセル
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className={`bg-white rounded-2xl shadow-xl p-8 mb-8 transform hover:scale-[1.02] transition-transform duration-300 ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
-              <form onSubmit={addSpecialDate} className="space-y-4">
+      <div className="min-h-screen bg-gradient-to-br from-blue-100 via-blue-50 to-sky-100">
+        <div className="container mx-auto p-6">
+          <div className="bg-white rounded-2xl p-8 mb-8 ${isLoading ? 'opacity-50 pointer-events-none' : ''}">
+            <form onSubmit={addSpecialDate} className="space-y-4">
                 <div>
                   <label className="block text-lg font-medium text-blue-600 mb-2">
                     カレンダーID 🔑
@@ -1384,7 +878,7 @@ export default function AnniversaryForm() {
                     value={calendarId}
                     onChange={(e) => setCalendarId(e.target.value)}
                     className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
-                    placeholder="例：family-calendar"
+                    placeholder="コピーしたカレンダーIDを入力してください"
                     required
                   />
                 </div>
@@ -1469,9 +963,9 @@ export default function AnniversaryForm() {
                 <div>
                   <label className="text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
                     終了日 📅
-                    <div className="group relative">
+                    <div className="relative group">
                       <Info className="w-5 h-5 text-gray-400 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10 pointer-events-none">
                         記念日の生成をいつまで続けるかを指定します。この日付まで月単位で記念日が作成されます。（最大100年まで）
                       </div>
                     </div>
@@ -1547,44 +1041,7 @@ export default function AnniversaryForm() {
                 </button>
               </form>
             </div>
-          )}
-
-          {showDeleteConfirmation && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
-                <h2 className="text-2xl font-bold text-red-600 mb-4">予定を削除しますか？</h2>
-                <p className="text-gray-600 mb-6">
-                  カレンダーID「{deleteCalendarId}」に関連する全ての予定を削除します。<br />
-                  この操作は取り消せません。本当に削除してもよろしいですか？
-                </p>
-                <div className="flex gap-4">
-                  <button
-                    onClick={handleDeleteByCalendarId}
-                    className="flex-1 bg-red-500 text-white py-3 px-6 rounded-xl text-lg font-bold hover:bg-red-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isLoading}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="w-6 h-6 animate-spin" />
-                        削除中...
-                      </>
-                    ) : (
-                      <>
-                        <Trash2 className="w-6 h-6" />
-                        削除する
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setShowDeleteConfirmation(false)}
-                    className="flex-1 bg-gray-200 text-gray-700 py-3 px-6 rounded-xl text-lg font-bold hover:bg-gray-300 transform hover:scale-105 transition-all duration-300"
-                  >
-                    キャンセル
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+        </div>
       </div>
     </div>
   );
