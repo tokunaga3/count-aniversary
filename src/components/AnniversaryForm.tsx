@@ -1369,26 +1369,57 @@ export default function AnniversaryForm() {
                 <div>
                   <label className="text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
                     記念日名 ✨
-                    <div className="group relative">
-                      <Info className="w-5 h-5 text-gray-400 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-80 p-3 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
-                        <div className="text-xs font-semibold mb-2">使用可能なプレースホルダー：</div>
-                        <div className="space-y-1 text-xs">
-                          <div><strong>{'{{count}}'}</strong>：通し番号（1〜）</div>
-                          <div><strong>{'{{years}}'}</strong>：経過年数</div>
-                          <div><strong>{'{{months}}'}</strong>：残りの月数（0〜11）</div>
-                          <div><strong>{'{{ym}}'}</strong>：X年Yヶ月形式</div>
-                        </div>
+                  </label>
+                  
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
+                      placeholder="例：結婚{{ym}}記念日💍、祝！{{years}}年{{months}}ヶ月記念"
+                    />
+                    
+                    {/* プレースホルダー自動入力ボタン */}
+                    <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                      <div className="text-sm font-medium text-gray-700 mb-2">プレースホルダー自動入力:</div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTitle(prev => prev + '{{count}}')}
+                          className="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
+                        >
+                          <span>📊</span>
+                          {'{{count}}'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTitle(prev => prev + '{{ym}}')}
+                          className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
+                        >
+                          <span>📅</span>
+                          {'{{ym}}'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTitle(prev => prev + '{{years}}')}
+                          className="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-1 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
+                        >
+                          <span>🎂</span>
+                          {'{{years}}'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTitle(prev => prev + '{{months}}')}
+                          className="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-1 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
+                        >
+                          <span>📆</span>
+                          {'{{months}}'}
+                        </button>
                       </div>
                     </div>
-                  </label>
-                  <input
-                    type="text"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
-                    placeholder="例：結婚{{ym}}記念日💍、祝！{{years}}年{{months}}ヶ月記念"
-                  />
+                  </div>
+                  
                   <div className="mt-2 text-sm text-gray-600">
                     <div className="font-semibold mb-1">プレースホルダー例：</div>
                     <div className="space-y-1 text-xs">
