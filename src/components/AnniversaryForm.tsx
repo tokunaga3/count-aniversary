@@ -1119,13 +1119,38 @@ export default function AnniversaryForm() {
                     : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200'
                 }`}>
                   <div className="space-y-3">
-                    {/* 現在の日付 */}
-                    {currentProcessing.currentDate && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-600">処理日付:</span>
-                        <span className="text-sm text-gray-800 font-mono bg-white px-2 py-1 rounded">
-                          {currentProcessing.currentDate}
-                        </span>
+           
+                    {/* 処理期間表示 - 記念日と終了日を表示 */}
+                    {(date || endDate) && (
+                      <div className="bg-white p-3 rounded-lg border border-gray-200">
+                        <div className="text-sm font-medium text-gray-600 mb-2">処理期間:</div>
+                        <div className="space-y-1">
+                          {date && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-gray-500">記念日:</span>
+                              <span className="text-sm text-gray-800 font-mono bg-gray-50 px-2 py-1 rounded">
+                                {new Date(date).toLocaleDateString('ja-JP')}
+                              </span>
+                            </div>
+                          )}
+                          {endDate && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-gray-500">終了日:</span>
+                              <span className="text-sm text-gray-800 font-mono bg-gray-50 px-2 py-1 rounded">
+                                {new Date(endDate).toLocaleDateString('ja-JP')}
+                              </span>
+                            </div>
+                          )}
+                          {/* 現在の処理日付 */}
+                          {currentProcessing.currentDate && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium text-gray-600">現在の処理日付:</span>
+                              <span className="text-sm text-gray-800 font-mono bg-white px-2 py-1 rounded">
+                                {currentProcessing.currentDate}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                     {/* 全体進捗表示 - 削除処理用に詳細化 */}
