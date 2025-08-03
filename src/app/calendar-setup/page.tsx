@@ -139,7 +139,7 @@ export default function CalendarSetup() {
             </div>
             
             <div className="mb-6">
-              <p className="text-sm text-gray-600 mb-1">カレンダーID (記念日登録時に必要です):</p>
+              <p className="text-sm text-gray-600 mb-1">カレンダーID (<span className="text-red-600 font-medium">記念日登録時に必要ですのでコピーしてください</span>):</p>
               <div className="flex items-center gap-2">
                 <div className="flex-1 bg-gray-100 p-3 rounded-lg text-gray-800 font-mono break-all">
                   {calendarId}
