@@ -2,6 +2,54 @@ import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import type { NextAuthOptions } from "next-auth";
 import type { JWT } from "next-auth/jwt";
+import { google } from "googleapis";
+
+/**
+ * スプレッドシートから許可されたユーザーリストを取得
+ */
+async function getAllowedUsers(): Promise<string[]> {
+  try {
+    const SPREADSHEET_ID = process.env.ALLOWED_USERS_SPREADSHEET_ID;
+    const RANGE = process.env.ALLOWED_USERS_RANGE || 'Sheet1!A:A';
+    
+    if (!SPREADSHEET_ID) {
+      console.log('ALLOWED_USERS_SPREADSHEET_ID が設定されていません');
+      throw new Error('ALLOWED_USERS_SPREADSHEET_ID が設定されていません');
+    }
+
+    const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    if (!serviceAccountKey) {
+      console.log('GOOGLE_SERVICE_ACCOUNT_KEY が設定されていません');
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY が設定されていません');
+    }
+
+    const credentials = JSON.parse(serviceAccountKey);
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    });
+
+    const sheets = google.sheets({ version: 'v4', auth });
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE,
+    });
+
+    const values = response.data.values || [];
+    const allowedUsers = values
+      .flat()
+      .filter(email => email && typeof email === 'string' && email.includes('@'))
+      .map(email => email.trim().toLowerCase());
+
+    console.log(`許可されたユーザー数: ${allowedUsers.length}`);
+    return allowedUsers;
+
+  } catch (error) {
+    console.error('スプレッドシートからの許可ユーザー取得エラー:', error);
+    // エラーの場合は空配列を返して全ユーザーを拒否
+    throw error;
+  }
+}
 
 /**
  * リフレッシュトークンを使用してアクセストークンを更新
@@ -85,6 +133,32 @@ export const authOptions: NextAuthOptions = {
       }),
     ],
     callbacks: {
+      async signIn({ user, account }) {
+        // Google認証の場合のみチェック
+        if (account?.provider === 'google' && user.email) {
+          try {
+            const allowedUsers = await getAllowedUsers();
+            
+            // スプレッドシートに記載されたユーザーのみ許可
+            const userEmail = user.email.toLowerCase();
+            const isAllowed = allowedUsers.includes(userEmail);
+            
+            if (isAllowed) {
+              console.log(`ユーザー ${userEmail} のログインを許可しました`);
+              return true;
+            } else {
+              console.log(`ユーザー ${userEmail} はアクセス許可リストにありません`);
+              return false;
+            }
+          } catch (error) {
+            console.error('ユーザー許可チェック中にエラーが発生しました:', error);
+            // エラーの場合はログインを拒否
+            return false;
+          }
+        }
+        
+        return true;
+      },
       async session({ session, token }) {
         session.accessToken = token.accessToken as string;
         session.refreshToken = token.refreshToken as string;
