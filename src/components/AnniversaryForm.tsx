@@ -19,7 +19,7 @@ export default function AnniversaryForm() {
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
   const [description, setDescription] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [recordYears, setRecordYears] = useState<number>(10);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
   const [progressMessage, setProgressMessage] = useState<string>('');
@@ -27,7 +27,7 @@ export default function AnniversaryForm() {
   const [isStoppedByUser, setIsStoppedByUser] = useState<boolean>(false); // ユーザーによる停止状態
   const [currentEventSource, setCurrentEventSource] = useState<EventSource | null>(null); // 現在のEventSource参照
   const [currentAbortController, setCurrentAbortController] = useState<AbortController | null>(null); // 現在のAbortController参照
-  const [dateValidationError, setDateValidationError] = useState<string>(''); // 日付バリデーションエラー
+  const [yearValidationError, setYearValidationError] = useState<string>(''); // 年数バリデーションエラー
   const [currentProcessing, setCurrentProcessing] = useState<{
     current: number;
     total: number;
@@ -42,46 +42,30 @@ export default function AnniversaryForm() {
     summary: ''
   });
 
-  // 日付バリデーション関数
-  const validateDateRange = (startDate: string, endDate: string): string => {
-    if (!startDate || !endDate) return '';
-    
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    // 終了日が開始日より前の場合
-    if (end <= start) {
-      return '終了日は記念日より後の日付を指定してください。';
+  // 年数バリデーション関数
+  const validateYears = (years: number): string => {
+    if (!years || years <= 0) {
+      return '1年以上を指定してください。';
     }
     
     // 100年制限チェック
-    const yearsDiff = end.getFullYear() - start.getFullYear();
-    const monthsDiff = (end.getFullYear() - start.getFullYear()) * 12 + 
-                      (end.getMonth() - start.getMonth());
-    
-    if (yearsDiff > 100) {
+    if (years > 100) {
       return '期間は100年以内に設定してください。';
     }
     
     // 警告レベル（50年以上）
-    if (yearsDiff >= 50) {
-      return `期間が${yearsDiff}年間（約${monthsDiff}ヶ月）と長期間です。多数のイベントが作成されますがよろしいですか？`;
+    if (years >= 50) {
+      return `期間が${years}年間と長期間です。多数のイベントが作成されますがよろしいですか？`;
     }
     
     return '';
   };
 
-  // 日付変更時のハンドラー
-  const handleDateChange = (newDate: string, isEndDate: boolean = false) => {
-    if (isEndDate) {
-      setEndDate(newDate);
-      const error = validateDateRange(date, newDate);
-      setDateValidationError(error);
-    } else {
-      setDate(newDate);
-      const error = validateDateRange(newDate, endDate);
-      setDateValidationError(error);
-    }
+  // 年数変更時のハンドラー
+  const handleYearsChange = (newYears: number) => {
+    setRecordYears(newYears);
+    const error = validateYears(newYears);
+    setYearValidationError(error);
   };
 
   // 停止ボタンの処理
@@ -155,11 +139,11 @@ export default function AnniversaryForm() {
 
   const addSpecialDate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date || !calendarId || !endDate) return;
+    if (!date || !calendarId || !recordYears) return;
     
-    // 日付バリデーション
-    const validationError = validateDateRange(date, endDate);
-    if (validationError && validationError.includes('100年以内') || validationError.includes('後の日付')) {
+    // 年数バリデーション
+    const validationError = validateYears(recordYears);
+    if (validationError && validationError.includes('100年以内')) {
       alert(`エラー: ${validationError}`);
       return;
     }
@@ -193,24 +177,28 @@ export default function AnniversaryForm() {
       const intervalType = 'monthly'; // 月単位固定
       const titleToSend = title.trim() === '' ? '🎉 #回目の記念日 🎉' : title;
       
-      // 予定される記念日の総数を計算（概算）
+      // 予定される記念日の総数を計算（年数から算出）
+      const monthsDiff = recordYears * 12;
+      
+      // 終了日を記念日から年数を計算して生成
       const startDateTime = new Date(date);
-      const endDateTime = new Date(endDate);
-      const monthsDiff = (endDateTime.getFullYear() - startDateTime.getFullYear()) * 12 + 
-                        (endDateTime.getMonth() - startDateTime.getMonth()) + 1;
+      const endDateTime = new Date(startDateTime);
+      endDateTime.setFullYear(startDateTime.getFullYear() + recordYears);
+      const endDateString = endDateTime.toISOString().split('T')[0];
       
       console.log('Sending data to API:', {
         startDate: date,
-        endDate: endDate,
+        endDate: endDateString,
         intervalType,
         comment: description,
         calenderId: calendarId,
         title: titleToSend,
-        estimatedCount: monthsDiff
+        estimatedCount: monthsDiff,
+        recordYears: recordYears
       });
 
       // 単発APIの繰り返し処理で記念日を登録
-      await performFallbackRegistration(titleToSend, intervalType, monthsDiff, abortController);
+      await performFallbackRegistration(titleToSend, intervalType, monthsDiff, abortController, endDateString);
       
     } catch (error) {
       console.error('記念日登録エラー:', error);
@@ -404,11 +392,18 @@ export default function AnniversaryForm() {
     console.log('単発APIの繰り返し処理を使用します');
     const fallbackAbortController = new AbortController();
     setCurrentAbortController(fallbackAbortController);
-    performFallbackRegistration(titleToSend, intervalType, estimatedCount, fallbackAbortController);
+    
+    // 終了日を記念日から年数を計算して生成
+    const startDateTime = new Date(date);
+    const endDateTime = new Date(startDateTime);
+    endDateTime.setFullYear(startDateTime.getFullYear() + estimatedCount / 12);
+    const endDateString = endDateTime.toISOString().split('T')[0];
+    
+    performFallbackRegistration(titleToSend, intervalType, estimatedCount, fallbackAbortController, endDateString);
   };
 
   // 単発APIの繰り返し処理による記念日登録（メイン処理）
-  const performFallbackRegistration = async (titleToSend: string, _intervalType: string, _estimatedCount: number, abortController: AbortController) => {
+  const performFallbackRegistration = async (titleToSend: string, _intervalType: string, _estimatedCount: number, abortController: AbortController, endDateString: string) => {
     try {
       // 停止チェック
       if (isStoppedByUser || abortController.signal.aborted) {
@@ -421,7 +416,7 @@ export default function AnniversaryForm() {
       setProgress(10);
       
       // まず記念日リストを生成（AbortController付き）
-      const generateResponse = await fetch(`/api/anniversary?action=generate&startDate=${encodeURIComponent(date)}&endDate=${encodeURIComponent(endDate)}&title=${encodeURIComponent(titleToSend)}&comment=${encodeURIComponent(description)}`, {
+      const generateResponse = await fetch(`/api/anniversary?action=generate&startDate=${encodeURIComponent(date)}&endDate=${encodeURIComponent(endDateString)}&title=${encodeURIComponent(titleToSend)}&comment=${encodeURIComponent(description)}`, {
         signal: abortController.signal
       });
       
@@ -585,7 +580,7 @@ export default function AnniversaryForm() {
       setCurrentProcessing({
         current: createdCount,
         total: totalCount,
-        currentDate: endDate,
+        currentDate: endDateString,
         summary: `${createdCount}件の記念日が登録されました`
       });
         
@@ -602,7 +597,7 @@ export default function AnniversaryForm() {
       setCalendarId('');
       setTitle('');
       setDate('');
-      setEndDate('');
+      setRecordYears(10);
       setDescription('');
       
       setTimeout(() => {
@@ -715,8 +710,8 @@ export default function AnniversaryForm() {
                 <div className="mt-4 p-4 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200 max-h-96 overflow-y-auto">
                   <div className="space-y-3">
            
-                    {/* 処理期間表示 - 記念日と終了日を表示 */}
-                    {(date || endDate) && (
+                    {/* 処理期間表示 - 記念日と記録年数を表示 */}
+                    {(date || recordYears) && (
                       <div className="bg-white p-3 rounded-lg border border-gray-200">
                         <div className="text-sm font-medium text-gray-600 mb-2">処理期間:</div>
                         <div className="space-y-1">
@@ -728,11 +723,15 @@ export default function AnniversaryForm() {
                               </span>
                             </div>
                           )}
-                          {endDate && (
+                          {recordYears && date && (
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-gray-500">終了日:</span>
+                              <span className="text-xs text-gray-500">記録期間:</span>
                               <span className="text-sm text-gray-800 font-mono bg-gray-50 px-2 py-1 rounded">
-                                {new Date(endDate).toLocaleDateString('ja-JP')}
+                                {recordYears}年分 (〜{(() => {
+                                  const endDate = new Date(date);
+                                  endDate.setFullYear(endDate.getFullYear() + recordYears);
+                                  return endDate.toLocaleDateString('ja-JP');
+                                })()})
                               </span>
                             </div>
                           )}
@@ -944,7 +943,7 @@ export default function AnniversaryForm() {
                   <input
                     type="date"
                     value={date}
-                    onChange={(e) => handleDateChange(e.target.value, false)}
+                    onChange={(e) => setDate(e.target.value)}
                     className="w-full px-4 py-3 border-2 border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black"
                     required
                   />
@@ -952,40 +951,43 @@ export default function AnniversaryForm() {
 
                 <div>
                   <label className="text-lg font-medium text-blue-600 mb-2 flex items-center gap-2">
-                    終了日 📅
+                    何年分記録する？
                     <div className="relative group">
                       <Info className="w-5 h-5 text-gray-400 cursor-help" />
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10 pointer-events-none">
-                        記念日の生成をいつまで続けるかを指定します。この日付まで月単位で記念日が作成されます。（最大100年まで）
+                        記念日から何年分の記念日を作成するかを指定します。月単位で記念日が作成されます。（最大100年まで）
                       </div>
                     </div>
                   </label>
                   <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => handleDateChange(e.target.value, true)}
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={recordYears}
+                    onChange={(e) => handleYearsChange(Number(e.target.value))}
                     className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-2 focus:ring-blue-400 focus:border-transparent text-black ${
-                      dateValidationError && (dateValidationError.includes('100年以内') || dateValidationError.includes('後の日付'))
+                      yearValidationError && yearValidationError.includes('100年以内')
                         ? 'border-red-500 bg-red-50' 
-                        : dateValidationError && dateValidationError.includes('長期間')
+                        : yearValidationError && yearValidationError.includes('長期間')
                         ? 'border-yellow-500 bg-yellow-50'
                         : 'border-blue-200'
                     }`}
+                    placeholder="例: 10"
                     required
                   />
-                  {dateValidationError && (
+                  {yearValidationError && (
                     <div className={`mt-2 p-2 rounded-lg text-sm ${
-                      dateValidationError.includes('100年以内') || dateValidationError.includes('後の日付')
+                      yearValidationError.includes('100年以内')
                         ? 'bg-red-100 text-red-700 border border-red-200'
-                        : dateValidationError.includes('長期間')
+                        : yearValidationError.includes('長期間')
                         ? 'bg-yellow-100 text-yellow-700 border border-yellow-200'
                         : 'bg-gray-100 text-gray-700'
                     }`}>
                       <div className="flex items-start gap-2">
                         <span className="text-lg">
-                          {dateValidationError.includes('100年以内') || dateValidationError.includes('後の日付') ? '❌' : '⚠️'}
+                          {yearValidationError.includes('100年以内') ? '❌' : '⚠️'}
                         </span>
-                        <span>{dateValidationError}</span>
+                        <span>{yearValidationError}</span>
                       </div>
                     </div>
                   )}
@@ -1011,10 +1013,7 @@ export default function AnniversaryForm() {
                   className="w-full bg-blue-500 text-white py-3 px-6 rounded-xl text-lg font-bold hover:bg-blue-600 transform hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={
                     isLoading || 
-                    Boolean(dateValidationError && (
-                      dateValidationError.includes('100年以内') || 
-                      dateValidationError.includes('後の日付')
-                    ))
+                    Boolean(yearValidationError && yearValidationError.includes('100年以内'))
                   }
                 >
                   {isLoading ? (
