@@ -11,7 +11,7 @@ async function getAllowedUsers(): Promise<string[]> {
   try {
     const SPREADSHEET_ID = process.env.ALLOWED_USERS_SPREADSHEET_ID;
     const RANGE = process.env.ALLOWED_USERS_RANGE || 'Sheet1!A:A';
-    
+
     if (!SPREADSHEET_ID) {
       console.log('ALLOWED_USERS_SPREADSHEET_ID が設定されていません');
       throw new Error('ALLOWED_USERS_SPREADSHEET_ID が設定されていません');
@@ -57,7 +57,7 @@ async function getAllowedUsers(): Promise<string[]> {
 async function refreshAccessToken(token: JWT): Promise<JWT> {
   try {
     console.log("アクセストークンをリフレッシュしています...");
-    
+
     const response = await fetch("https://oauth2.googleapis.com/token", {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -79,7 +79,7 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
     }
 
     console.log("アクセストークンの更新に成功しました");
-    
+
     return {
       ...token,
       accessToken: tokens.access_token,
@@ -88,7 +88,7 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
     };
   } catch (error) {
     console.error("アクセストークンのリフレッシュに失敗:", error);
-    
+
     return {
       ...token,
       error: "RefreshAccessTokenError",
@@ -98,93 +98,98 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
 
 
 declare module "next-auth" {
-    interface Session {
-      accessToken?: string;
-      refreshToken?: string;
-      error?: string;
-    }
+  interface Session {
+    accessToken?: string;
+    refreshToken?: string;
+    error?: string;
   }
+}
 
-  declare module "next-auth/jwt" {
-    interface JWT {
-      accessToken?: string;
-      refreshToken?: string;
-      expires_at?: number;
-      error?: string;
-    }
+declare module "next-auth/jwt" {
+  interface JWT {
+    accessToken?: string;
+    refreshToken?: string;
+    expires_at?: number;
+    error?: string;
   }
-  
+}
+
 
 export const authOptions: NextAuthOptions = {
-    secret: process.env.NEXTAUTH_SECRET!,
-    providers: [
-      GoogleProvider({
-        clientId: process.env.GOOGLE_CLIENT_ID!,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        authorization: {
-          params: {
-            scope:
-              "https://www.googleapis.com/auth/calendar openid email profile",
-            prompt: "select_account", // consentからselect_accountに変更して警告を軽減
-            access_type: "offline",
-            response_type: "code",
-          },
+  secret: process.env.NEXTAUTH_SECRET!,
+  providers: [
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      authorization: {
+        params: {
+          scope:
+            "https://www.googleapis.com/auth/calendar openid email profile",
+          prompt: "select_account", // consentからselect_accountに変更して警告を軽減
+          access_type: "offline",
+          response_type: "code",
         },
-      }),
-    ],
-    callbacks: {
-      async signIn({ user, account }) {
-        // Google認証の場合のみチェック
-        if (account?.provider === 'google' && user.email) {
-          try {
-            const allowedUsers = await getAllowedUsers();
-            
-            // スプレッドシートに記載されたユーザーのみ許可
-            const userEmail = user.email.toLowerCase();
-            const isAllowed = allowedUsers.includes(userEmail);
-            
-            if (isAllowed) {
-              console.log(`ユーザー ${userEmail} のログインを許可しました`);
-              return true;
-            } else {
-              console.log(`ユーザー ${userEmail} はアクセス許可リストにありません`);
-              return false;
-            }
-          } catch (error) {
-            console.error('ユーザー許可チェック中にエラーが発生しました:', error);
-            // エラーの場合はログインを拒否
+      },
+    }),
+  ],
+  callbacks: {
+    async signIn({ user, account }) {
+      // Google認証の場合のみチェック
+      if (account?.provider === 'google' && user.email) {
+        const flag = process.env.IS_ALLOWED_GOOGLE_AUTH_ENABLED === 'true';
+        if (!flag) {
+          console.log('許可ユーザー制限は現在無効化されています (IS_ALLOWED_GOOGLE_AUTH_ENABLED=false)');
+          return true; // 制限OFF
+        }
+        try {
+          const allowedUsers = await getAllowedUsers();
+
+          // スプレッドシートに記載されたユーザーのみ許可
+          const userEmail = user.email.toLowerCase();
+          const isAllowed = allowedUsers.includes(userEmail);
+
+          if (isAllowed) {
+            console.log(`ユーザー ${userEmail} のログインを許可しました`);
+            return true;
+          } else {
+            console.log(`ユーザー ${userEmail} はアクセス許可リストにありません`);
             return false;
           }
+        } catch (error) {
+          console.error('ユーザー許可チェック中にエラーが発生しました:', error);
+          // エラーの場合はログインを拒否
+          return false;
         }
-        
-        return true;
-      },
-      async session({ session, token }) {
-        session.accessToken = token.accessToken as string;
-        session.refreshToken = token.refreshToken as string;
-        session.error = token.error as string;
-        return session;
-      },
-      async jwt({ token, account }) {
-        // 初回認証時：アカウント情報からトークンを保存
-        if (account) {
-          return {
-            ...token,
-            accessToken: account.access_token,
-            refreshToken: account.refresh_token,
-            expires_at: Math.floor(Date.now() / 1000 + (account.expires_at || 3600)),
-          };
-        }
+      }
 
-        // アクセストークンがまだ有効な場合はそのまま返す
-        if (token.expires_at && Date.now() < (token.expires_at as number) * 1000) {
-          return token;
-        }
-
-        // アクセストークンが期限切れの場合、リフレッシュを試行
-        return await refreshAccessToken(token);
-      },
+      return true;
     },
-  };
-  
- export const handler = NextAuth(authOptions);
+    async session({ session, token }) {
+      session.accessToken = token.accessToken as string;
+      session.refreshToken = token.refreshToken as string;
+      session.error = token.error as string;
+      return session;
+    },
+    async jwt({ token, account }) {
+      // 初回認証時：アカウント情報からトークンを保存
+      if (account) {
+        return {
+          ...token,
+          accessToken: account.access_token,
+          refreshToken: account.refresh_token,
+          expires_at: Math.floor(Date.now() / 1000 + (account.expires_at || 3600)),
+        };
+      }
+
+      // アクセストークンがまだ有効な場合はそのまま返す
+      if (token.expires_at && Date.now() < (token.expires_at as number) * 1000) {
+        return token;
+      }
+
+      // アクセストークンが期限切れの場合、リフレッシュを試行
+      return await refreshAccessToken(token);
+    },
+  },
+};
+
+export const handler = NextAuth(authOptions);
