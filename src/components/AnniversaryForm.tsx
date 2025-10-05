@@ -914,7 +914,7 @@ export default function AnniversaryForm() {
                           className="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex flex-col items-center gap-1"
                         >
                           <div className="font-bold text-lg text-purple-800">{'{{years}}'}</div>
-                          <div className="text-xs text-center">祝！{'{{years}}'}年{'{{months}}'}ヶ月記念🎂<br />↓<br />祝！1年1ヶ月記念🎂</div>
+                          <div className="text-xs text-center">祝！{'{{years}}'}周年記念🎂<br />↓<br />祝！1周年記念🎂</div>
                         </button>
                         <button
                           type="button"
@@ -922,7 +922,7 @@ export default function AnniversaryForm() {
                           className="bg-yellow-100 hover:bg-yellow-200 text-yellow-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex flex-col items-center gap-1"
                         >
                           <div className="font-bold text-lg text-yellow-800">{'{{months}}'}</div>
-                           <div className="text-xs text-center">祝！{'{{years}}'}年{'{{months}}'}ヶ月記念🎂<br />↓<br />祝！1年1ヶ月記念🎂</div>
+                           <div className="text-xs text-center">祝！{'{{months}}'}ヶ月記念🎂<br />↓<br />祝！1ヶ月記念🎂</div>
                         </button>
                         <button
                           type="button"
