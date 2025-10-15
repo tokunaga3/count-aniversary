@@ -98,33 +98,55 @@ export default function MemorialPage() {
           <div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">命日（YYYY-MM-DD）</label>
-                <input type="date" className="mt-1 w-full rounded-md border px-3 py-2"
-                  value={baseDate} onChange={(e) => setBaseDate(e.target.value)} />
+                <label className="block text-sm font-medium text-gray-800">命日（YYYY-MM-DD）</label>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={baseDate}
+                  onChange={(e) => setBaseDate(e.target.value)}
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">上限（何年分まで）</label>
-                <input type="number" min={1} max={49} className="mt-1 w-full rounded-md border px-3 py-2"
-                  value={untilYears} onChange={(e) => setUntilYears(Number(e.target.value))} />
+                <label className="block text-sm font-medium text-gray-800">上限（何年分まで）</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={49}
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={untilYears}
+                  onChange={(e) => setUntilYears(Number(e.target.value))}
+                />
                 <p className="text-xs text-gray-500 mt-1">一周忌〜五十回忌まで（最大49年）</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">カレンダーID</label>
-                <input type="text" className="mt-1 w-full rounded-md border px-3 py-2"
+                <label className="block text-sm font-medium text-gray-800">カレンダーID</label>
+                <input
+                  type="text"
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   placeholder="example@gmail.com など"
-                  value={calendarId} onChange={(e) => setCalendarId(e.target.value)} />
+                  value={calendarId}
+                  onChange={(e) => setCalendarId(e.target.value)}
+                />
                 <p className="text-xs text-gray-500 mt-1">セットアップで作成したIDを利用。calendar-setupから遷移すると自動入力されます。</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">タイトルテンプレート</label>
-                <input type="text" className="mt-1 w-full rounded-md border px-3 py-2"
-                  value={titleTemplate} onChange={(e) => setTitleTemplate(e.target.value)} />
+                <label className="block text-sm font-medium text-gray-800">タイトルテンプレート</label>
+                <input
+                  type="text"
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={titleTemplate}
+                  onChange={(e) => setTitleTemplate(e.target.value)}
+                />
                 <p className="text-xs text-gray-500 mt-1">利用可: {'{{houyou}}'}, {'{{year}}'}, {'{{base_date}}'}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">メモ（説明）</label>
-                <textarea className="mt-1 w-full rounded-md border px-3 py-2"
-                  rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
+                <label className="block text-sm font-medium text-gray-800">メモ（説明）</label>
+                <textarea
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  rows={3}
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                />
               </div>
             </div>
             <div className="flex gap-3 mt-4">

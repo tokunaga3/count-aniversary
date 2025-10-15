@@ -127,16 +127,30 @@ export default function BiweeklyPage() {
           <div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">開始日</label>
-                <input type="date" className="mt-1 w-full rounded-md border px-3 py-2" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <label className="block text-sm font-medium text-gray-800">開始日</label>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">終了日</label>
-                <input type="date" className="mt-1 w-full rounded-md border px-3 py-2" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                <label className="block text-sm font-medium text-gray-800">終了日</label>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">曜日</label>
-                <select className="mt-1 w-full rounded-md border px-3 py-2" value={weekday} onChange={(e) => setWeekday(e.target.value)}>
+                <label className="block text-sm font-medium text-gray-800">曜日</label>
+                <select
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={weekday}
+                  onChange={(e) => setWeekday(e.target.value)}
+                >
                   <option value="0">日</option>
                   <option value="1">月</option>
                   <option value="2">火</option>
@@ -147,24 +161,45 @@ export default function BiweeklyPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">時間帯 (HH:MM-HH:MM)</label>
-                <input type="text" className="mt-1 w-full rounded-md border px-3 py-2" value={timeRange} onChange={(e) => setTimeRange(e.target.value)} />
+                <label className="block text-sm font-medium text-gray-800">時間帯 (HH:MM-HH:MM)</label>
+                <input
+                  type="text"
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={timeRange}
+                  onChange={(e) => setTimeRange(e.target.value)}
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">タイトル</label>
-                <input type="text" className="mt-1 w-full rounded-md border px-3 py-2" value={title} onChange={(e) => setTitle(e.target.value)} />
+                <label className="block text-sm font-medium text-gray-800">タイトル</label>
+                <input
+                  type="text"
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">メモ（説明）</label>
-                <textarea className="mt-1 w-full rounded-md border px-3 py-2" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
+                <label className="block text-sm font-medium text-gray-800">メモ（説明）</label>
+                <textarea
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  rows={3}
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                />
               </div>
               <div className="flex items-center gap-2">
-                <input id="skip-holidays" type="checkbox" className="h-4 w-4" checked={skipHolidays} onChange={(e) => setSkipHolidays(e.target.checked)} />
-                <label htmlFor="skip-holidays" className="text-sm text-gray-700">祝日を除外する</label>
+                <input id="skip-holidays" type="checkbox" className="h-4 w-4 accent-blue-600" checked={skipHolidays} onChange={(e) => setSkipHolidays(e.target.checked)} />
+                <label htmlFor="skip-holidays" className="text-sm text-gray-800">祝日を除外する</label>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">カレンダーID</label>
-                <input type="text" className="mt-1 w-full rounded-md border px-3 py-2" placeholder="example@gmail.com など" value={calendarId} onChange={(e) => setCalendarId(e.target.value)} />
+                <label className="block text-sm font-medium text-gray-800">カレンダーID</label>
+                <input
+                  type="text"
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="example@gmail.com など"
+                  value={calendarId}
+                  onChange={(e) => setCalendarId(e.target.value)}
+                />
                 <p className="text-xs text-gray-500 mt-1">セットアップで作成したIDを利用。calendar-setupから遷移すると自動入力されます。</p>
               </div>
             </div>
