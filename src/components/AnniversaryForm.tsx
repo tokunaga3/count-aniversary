@@ -13,9 +13,9 @@ interface SpecialDate {
   repeatCount: number;
 }
 
-export default function AnniversaryForm() {
+export default function AnniversaryForm({ initialCalendarId }: { initialCalendarId?: string } = {}) {
   const [specialDates, setSpecialDates] = useState<SpecialDate[]>([]);
-  const [calendarId, setCalendarId] = useState('');
+  const [calendarId, setCalendarId] = useState(initialCalendarId || '');
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
   const [description, setDescription] = useState('');

@@ -69,7 +69,7 @@ export default function CalendarSetup() {
   };
 
   const goToMainApp = () => {
-    router.push(`/?calendarId=${encodeURIComponent(calendarId)}`);
+    router.push(`/anniversary?calendarId=${encodeURIComponent(calendarId)}`);
   };
 
   // セッションがなく、かつロード中でない場合は何も表示しない（useEffectでリダイレクトされるため）
@@ -181,6 +181,13 @@ export default function CalendarSetup() {
             >
               思い出カレンダーを使い始める
             </button>
+
+            {/* 機能ページへのショートカット */}
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <a href="/anniversary" className="text-center bg-blue-50 text-blue-700 py-2 rounded-lg hover:bg-blue-100">記念日へ</a>
+              <a href="/memorial" className="text-center bg-purple-50 text-purple-700 py-2 rounded-lg hover:bg-purple-100">法要へ</a>
+              <a href="/biweekly" className="text-center bg-teal-50 text-teal-700 py-2 rounded-lg hover:bg-teal-100">隔週へ</a>
+            </div>
           </>
         )}
       </div>
