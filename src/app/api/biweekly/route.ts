@@ -48,17 +48,26 @@ async function fetchHolidayDates(authToken: string, start: Date, end: Date): Pro
   });
   const set = new Set<string>();
   for (const ev of res.data.items || []) {
-    const d = ev.start?.date || ev.start?.dateTime;
-    if (d) set.add((ev.start?.date ? new Date(d + 'T00:00:00Z') : new Date(d)).toISOString().split('T')[0]);
+    // 日本の祝日は終日イベントなので start.date が基本
+    if (ev.start?.date) {
+      set.add(ev.start.date);
+    } else if (ev.start?.dateTime) {
+      // 念のため dateTime の場合もサポート（UTC基準で日付を抽出）
+      set.add(new Date(ev.start.dateTime).toISOString().split('T')[0]);
+    }
   }
   return set;
 }
 
-function toLocalDateTime(date: Date, timeHHMM: string): string {
+// JST(+09:00)でのローカル時刻を明示的に作る（サーバーのタイムゾーンに影響されない）
+function toJstDateTime(date: Date, timeHHMM: string): string {
   const [hh, mm] = timeHHMM.split(':').map(Number);
-  const d = new Date(date);
-  d.setHours(hh, mm, 0, 0);
-  return d.toISOString();
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const h = String(hh).padStart(2, '0');
+  const mi = String(mm).padStart(2, '0');
+  return `${y}-${m}-${d}T${h}:${mi}:00+09:00`;
 }
 
 export async function GET(request: NextRequest) {
@@ -98,8 +107,17 @@ export async function GET(request: NextRequest) {
       if (/^\d$/.test(weekdayStr)) {
         weekday = parseInt(weekdayStr, 10);
       } else {
-        const map: Record<string, number> = { 'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6, '日':0,'月':1,'火':2,'水':3,'木':4,'金':5,'土':6 };
-        weekday = map[weekdayStr.toLowerCase()] ?? 1; // default Monday
+        const key = weekdayStr.toLowerCase();
+        const map: Record<string, number> = {
+          sun: 0, sunday: 0, '日': 0,
+          mon: 1, monday: 1, '月': 1,
+          tue: 2, tuesday: 2, '火': 2,
+          wed: 3, wednesday: 3, '水': 3,
+          thu: 4, thursday: 4, '木': 4,
+          fri: 5, friday: 5, '金': 5,
+          sat: 6, saturday: 6, '土': 6,
+        };
+        weekday = map[key] ?? 1; // default Monday
       }
 
       // 祝日取得
@@ -116,8 +134,8 @@ export async function GET(request: NextRequest) {
         if (!skipHolidays || !isHoliday) {
           events.push({
             title,
-            startDateTime: toLocalDateTime(cursor, start),
-            endDateTime: toLocalDateTime(cursor, end),
+            startDateTime: toJstDateTime(cursor, start),
+            endDateTime: toJstDateTime(cursor, end),
             description,
           });
         }
@@ -202,8 +220,9 @@ export async function POST(req: NextRequest) {
           const requestBody: calendar_v3.Schema$Event = {
             summary: e.title,
             description: e.description || '',
-            start: { dateTime: e.startDateTime, timeZone: 'Asia/Tokyo' },
-            end: { dateTime: e.endDateTime, timeZone: 'Asia/Tokyo' },
+            // dateTime に +09:00 を含めているため timeZone 指定は省略
+            start: { dateTime: e.startDateTime },
+            end: { dateTime: e.endDateTime },
           };
           const created = await calendar.events.insert({ calendarId, requestBody });
           results.push({ index: i, success: true, id: created.data.id || undefined });
