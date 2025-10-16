@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Calendar, Loader2, Info } from 'lucide-react';
 
 interface SpecialDate {
@@ -41,6 +41,13 @@ export default function AnniversaryForm({ initialCalendarId }: { initialCalendar
     currentDate: '',
     summary: ''
   });
+
+  // 親からの initialCalendarId が後から渡ってきた場合にも反映
+  useEffect(() => {
+    if (initialCalendarId) {
+      setCalendarId(initialCalendarId);
+    }
+  }, [initialCalendarId]);
 
   // 年数バリデーション関数
   const validateYears = (years: number): string => {

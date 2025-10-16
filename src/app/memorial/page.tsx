@@ -3,10 +3,10 @@
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-export default function MemorialPage() {
+function MemorialInner() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -181,5 +181,13 @@ export default function MemorialPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MemorialPage() {
+  return (
+    <Suspense>
+      <MemorialInner />
+    </Suspense>
   );
 }

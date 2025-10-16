@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AnniversaryForm from "@/components/AnniversaryForm";
 import { useSearchParams } from "next/navigation";
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 
-export default function AnniversaryPage() {
+function AnniversaryInner() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -34,5 +34,13 @@ export default function AnniversaryPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AnniversaryPage() {
+  return (
+    <Suspense>
+      <AnniversaryInner />
+    </Suspense>
   );
 }
