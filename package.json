@@ -13,7 +13,7 @@
     "googleapis": "^146.0.0",
     "japanese-holidays": "^1.0.10",
     "lucide-react": "^0.483.0",
-    "next": "15.1.7",
+    "next": "15.1.11",
     "next-auth": "^4.24.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
